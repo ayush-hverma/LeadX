@@ -48,11 +48,10 @@ email_results/
 *.log 
 
 # Streamlit secrets
-<<<<<<< HEAD
 .streamlit/secrets.toml
-=======
+
 .streamlit/secrets.toml
 
 # Client secrets
 client_secrets.json
->>>>>>> 9769ff48857350839f38cc0561b4fdcbb9e28438
+
