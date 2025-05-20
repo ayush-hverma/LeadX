@@ -23,8 +23,8 @@ Office365-REST-Python-Client==2.5.0
 O365==2.0.26
 
 # AI and Language Models
-google-generativeai==0.3.2
-google-ai-generativelanguage==0.4.0
+google-generativeai
+# Removed google-generativeai to avoid conflict
 langchain==0.3.25
 langchain-core==0.3.59
 langchain-community==0.3.21
