@@ -10,6 +10,7 @@ import requests
 import logging
 import pickle
 from google.auth.exceptions import RefreshError
+from dotenv import load_dotenv
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -138,7 +139,6 @@ def handle_auth_callback(code):
         try:
             gmail_service = build('gmail', 'v1', credentials=credentials)
             st.session_state.gmail_service = gmail_service
-            logger.info("Successfully initialized Gmail service")
         except Exception as e:
             logger.error(f"Failed to initialize Gmail service: {str(e)}", exc_info=True)
             st.error(f"Gmail service initialization failed: {str(e)}")
