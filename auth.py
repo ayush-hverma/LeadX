@@ -10,7 +10,6 @@ import requests
 import logging
 import pickle
 from google.auth.exceptions import RefreshError
-from dotenv import load_dotenv
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -122,26 +121,22 @@ def handle_auth_callback(code):
         flow.fetch_token(code=code)
         credentials = flow.credentials
 
-        # Save credentials
         save_credentials(credentials)
         st.session_state.credentials = credentials
 
-        # Get user info
         user_info = get_user_info(credentials)
         if not user_info:
-            logger.error("Failed to get user information")
             st.error("Failed to get user information. Please try again.")
             return None
 
         st.session_state.user_info = user_info
 
-        # Initialize Gmail service
         try:
             gmail_service = build('gmail', 'v1', credentials=credentials)
             st.session_state.gmail_service = gmail_service
         except Exception as e:
             logger.error(f"Failed to initialize Gmail service: {str(e)}", exc_info=True)
-            st.error(f"Gmail service initialization failed: {str(e)}")
+            st.error(f"Gmail service init error: {str(e)}")
             return None
 
         return user_info
@@ -169,81 +164,19 @@ def get_user_info(credentials):
 
 
 def is_authenticated():
-    """Check if user is authenticated with valid Gmail service."""
-    try:
-        if not st.session_state.user_info:
-            return False
-            
-        # Check if we have valid credentials
-        if not st.session_state.credentials:
-            return False
-            
-        # Check if credentials need refresh
-        if st.session_state.credentials.expired and st.session_state.credentials.refresh_token:
-            try:
-                st.session_state.credentials.refresh(Request())
-                save_credentials(st.session_state.credentials)
-            except RefreshError:
-                return False
-                
-        # Check if Gmail service is initialized
-        if not st.session_state.gmail_service:
-            gmail_service = get_gmail_service()
-            if not gmail_service:
-                return False
-                
-        return True
-    except Exception as e:
-        logger.error(f"Error checking authentication: {str(e)}")
-        return False
+    return st.session_state.user_info is not None
 
 
 def get_user_email():
-    from outlook_auth import is_outlook_authenticated, get_outlook_email
-    if is_outlook_authenticated():
-        return get_outlook_email()
     return st.session_state.user_info.get('email') if is_authenticated() else None
 
 
 def get_user_name():
-    from outlook_auth import is_outlook_authenticated, get_outlook_name
-    if is_outlook_authenticated():
-        return get_outlook_name()
     return st.session_state.user_info.get('name') if is_authenticated() else None
 
 
 def get_gmail_service():
-    """Get the Gmail service instance, refreshing credentials if needed."""
-    try:
-        if not st.session_state.gmail_service:
-            # Try to load credentials from file
-            credentials = load_credentials()
-            if not credentials:
-                logger.error("No valid credentials found")
-                return None
-            
-            # Check if credentials need refresh
-            if credentials.expired and credentials.refresh_token:
-                try:
-                    credentials.refresh(Request())
-                    save_credentials(credentials)
-                    st.session_state.credentials = credentials
-                except RefreshError as e:
-                    logger.error(f"Failed to refresh credentials: {str(e)}")
-                    return None
-            
-            # Build Gmail service
-            try:
-                gmail_service = build('gmail', 'v1', credentials=credentials)
-                st.session_state.gmail_service = gmail_service
-            except Exception as e:
-                logger.error(f"Failed to build Gmail service: {str(e)}")
-                return None
-        
-        return st.session_state.gmail_service
-    except Exception as e:
-        logger.error(f"Error getting Gmail service: {str(e)}")
-        return None
+    return st.session_state.gmail_service
 
 
 def logout():
