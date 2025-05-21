@@ -50,8 +50,6 @@ email_results/
 # Streamlit secrets
 .streamlit/secrets.toml
 
-.streamlit/secrets.toml
-
 # Client secrets
 client_secrets.json
 
