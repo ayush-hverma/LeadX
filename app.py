@@ -49,7 +49,7 @@ google_client_id = st.secrets["GOOGLE_CLIENT_ID"]
 redirect_uri = st.secrets["REDIRECT_URI"]
 google_client_secret = st.secrets["GOOGLE_CLIENT_SECRET"]
 google_project_id = st.secrets["GOOGLE_PROJECT_ID"]
-google_redirect_uris = st.secrets["GOOGLE_REDIRECT_URIS"]
+# google_redirect_uris = st.secrets["GOOGLE_REDIRECT_URIS"]
 
 # Azure AD configuration
 CLIENT_ID = os.getenv("CLIENT_ID")
