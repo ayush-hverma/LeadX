@@ -6,6 +6,7 @@ import pandas as pd
 from O365 import Account
 from outlook_auth import get_outlook_account, get_outlook_email, get_outlook_name, is_outlook_authenticated
 import json
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -13,96 +14,115 @@ logger = logging.getLogger(__name__)
 
 class OutlookSender:
     def __init__(self, batch_size: int = 5):
+        """Initialize Outlook sender with authentication"""
         self.batch_size = batch_size
-        logger.info("Initializing OutlookSender")
+        self.account = None
+        self.mailbox = None
+        self._initialize_account()
+
+    def _initialize_account(self):
+        """Initialize or reinitialize the Outlook account"""
         try:
+            # Get authenticated account
             self.account = get_outlook_account()
             if not self.account:
-                logger.error("Failed to get Outlook account - account is None")
-                raise ValueError("Outlook account not initialized")
+                raise Exception("Failed to get authenticated Outlook account")
+            
+            # Get mailbox
+            self.mailbox = self.account.mailbox()
+            if not self.mailbox:
+                raise Exception("Failed to get mailbox")
+                
             logger.info("Successfully initialized Outlook account")
         except Exception as e:
-            logger.error(f"Error initializing Outlook account: {str(e)}")
+            logger.error(f"Error initializing Outlook sender: {str(e)}")
             raise
-        
-    def create_message(self, to: str, subject: str, body: str, sender_email: str) -> Dict[str, Any]:
-        """Create a message for an email."""
+
+    def create_message(self, payload):
+        """Create an email message from the payload"""
         try:
-            if not self.account:
-                logger.error("Outlook account not initialized")
-                raise ValueError("Outlook account not initialized")
+            # Ensure we have a valid account
+            if not self.account or not self.mailbox:
+                self._initialize_account()
                 
-            # Create a new message
-            mailbox = self.account.mailbox()
-            if not mailbox:
-                logger.error("Failed to get mailbox")
-                raise ValueError("Failed to get mailbox")
-                
-            message = mailbox.new_message()
-            if not message:
-                logger.error("Failed to create new message")
-                raise ValueError("Failed to create new message")
-            
-            # Set message properties
-            message.to.add(to)
-            message.subject = subject
-            
-            # Add recipient's email ID in the header using the correct method
-            message.headers = {'X-Recipient-ID': to}
-            
-            # Add recipient's email ID at the top of the body
-            modified_body = f"Recipient Email ID: {to}\n\n{body}"
-            message.body = modified_body
-            
-            logger.info(f"Successfully created message for recipient: {to}")
+            # Create message
+            message = self.mailbox.new_message()
+            message.to.add(payload['email'][0])  # API expects a list of emails
+            message.subject = payload['subject']
+            message.body = payload['body']
             return message
         except Exception as e:
-            logger.error(f"Error creating message for {to}: {str(e)}")
+            logger.error(f"Error creating message: {str(e)}")
             raise
 
-    async def send_email_batch(self, batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Send a batch of emails using Outlook API."""
-        results = []
-        
-        if not self.account:
-            logger.error("Outlook account not initialized")
-            return [{"error": "Outlook account not initialized. Please sign in again.", "status_code": 500}]
-        
-        for email_data in batch:
-            try:
-                # Validate required fields
-                if not all(key in email_data for key in ['email', 'subject', 'body', 'sender_email']):
-                    raise ValueError("Missing required email fields")
-                
-                # Create the message
-                message = self.create_message(
-                    to=email_data['email'][0],
-                    subject=email_data['subject'],
-                    body=email_data['body'],
-                    sender_email=email_data['sender_email']
-                )
-                
-                # Send the message
-                message.send()
-                
-                logger.info(f"Successfully sent email to {email_data['email'][0]}")
-                results.append({
-                    "status": "success",
-                    "recipient": email_data['email'][0]
-                })
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"Error sending email to {email_data.get('email', ['unknown'])[0]}: {error_msg}")
-                results.append({
-                    "error": error_msg,
-                    "status_code": 500,
-                    "recipient": email_data.get('email', ['unknown'])[0]
-                })
-        
-        return results
+    def send_email_batch(self, email_payloads):
+        """Send a batch of emails"""
+        if not email_payloads:
+            logger.error("No email payloads provided")
+            return {
+                'success': False,
+                'message': 'No email payloads provided',
+                'total': 0,
+                'successful': 0,
+                'failed': 0
+            }
+
+        total = len(email_payloads)
+        successful = 0
+        failed = 0
+
+        try:
+            # Process each email
+            for payload in email_payloads:
+                try:
+                    # Create and send message
+                    message = self.create_message(payload)
+                    if not message:
+                        logger.error(f"Failed to create message for {payload['email']}")
+                        continue
+                        
+                    if message.send():
+                        successful += 1
+                        logger.info(f"Successfully sent email to {payload['email']}")
+                    else:
+                        logger.error(f"Failed to send email to {payload['email']}")
+                except Exception as e:
+                    failed += 1
+                    logger.error(f"Error sending email to {payload['email']}: {str(e)}")
+                    # If token refresh error, try to refresh and retry once
+                    if "No auth token found" in str(e) or "refresh_token" in str(e):
+                        try:
+                            # Reinitialize account and retry
+                            self._initialize_account()
+                            message = self.create_message(payload)
+                            if message.send():
+                                successful += 1
+                                failed -= 1
+                                logger.info(f"Successfully sent email to {payload['email']} after token refresh")
+                            else:
+                                logger.error(f"Failed to send email to {payload['email']} after token refresh")
+                        except Exception as retry_error:
+                            logger.error(f"Error retrying email to {payload['email']}: {str(retry_error)}")
+
+            return {
+                'success': successful > 0,
+                'message': f'Email sending completed. Total: {total}, Successful: {successful}, Failed: {failed}',
+                'total': total,
+                'successful': successful,
+                'failed': failed
+            }
+        except Exception as e:
+            logger.error(f"Error in send_email_batch: {str(e)}")
+            return {
+                'success': False,
+                'message': f'Error sending emails: {str(e)}',
+                'total': total,
+                'successful': successful,
+                'failed': failed
+            }
 
     async def send_emails(self, email_payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Send all emails in batches concurrently."""
+        """Send all emails in batches."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         if not email_payloads:
@@ -120,30 +140,26 @@ class OutlookSender:
                   for i in range(0, len(email_payloads), self.batch_size)]
         
         # Process batches
-        all_results = []
+        total_successful = 0
+        total_failed = 0
+        
         for batch_num, batch in enumerate(batches, 1):
             logger.info(f"Processing batch {batch_num} of {len(batches)}")
-            results = await self.send_email_batch(batch)
-            all_results.extend(results)
+            result = self.send_email_batch(batch)
+            total_successful += result['successful']
+            total_failed += result['failed']
         
-        # Calculate summary
-        successful = len([r for r in all_results if r.get("status") == "success"])
-        failed = len([r for r in all_results if r.get("error")])
-        
-        # Log summary
-        logger.info(f"Email sending completed. Total: {len(email_payloads)}, Successful: {successful}, Failed: {failed}")
-        
-        # Return detailed summary
+        # Return summary
         return {
             "timestamp": timestamp,
             "total_emails": len(email_payloads),
-            "successful": successful,
-            "failed": failed,
-            "results": all_results
+            "successful": total_successful,
+            "failed": total_failed,
+            "message": f"Email sending completed. Total: {len(email_payloads)}, Successful: {total_successful}, Failed: {total_failed}"
         }
 
 def prepare_outlook_email_payloads(generated_emails: List[Dict[str, Any]], enriched_data: pd.DataFrame = None) -> List[Dict[str, Any]]:
-    """Convert generated emails into the format required for Outlook sending."""
+    """Convert generated emails into the format required by the Outlook API."""
     payloads = []
     
     logger.info(f"Starting to prepare email payloads. Generated emails count: {len(generated_emails)}")
@@ -157,7 +173,6 @@ def prepare_outlook_email_payloads(generated_emails: List[Dict[str, Any]], enric
     # Get sender information
     sender_email = get_outlook_email()
     sender_name = get_outlook_name()
-    
     logger.info(f"Sender email: {sender_email}")
     logger.info(f"Sender name: {sender_name}")
     
@@ -186,6 +201,12 @@ def prepare_outlook_email_payloads(generated_emails: List[Dict[str, Any]], enric
                 logger.warning(f"Skipping invalid result type: {type(result)}")
                 continue
                 
+            # Get the final result from the correct structure
+            final_result = result.get("final_result", {})
+            if not final_result:
+                logger.warning(f"No final_result found in email data: {result}")
+                continue
+                
             # Get lead_id and find email from enriched data
             lead_id = result.get("lead_id")
             if not lead_id:
@@ -199,8 +220,8 @@ def prepare_outlook_email_payloads(generated_emails: List[Dict[str, Any]], enric
                 continue
                 
             email = lead_data['email'].iloc[0]
-            subject = result.get("subject", "")
-            body = result.get("body", "")
+            subject = final_result.get("subject", "")
+            body = final_result.get("body", "")
             
             # Skip if any required field is missing
             if not all([email, subject, body]):
