@@ -2,6 +2,7 @@ import logging
 from typing import List, Dict, Any
 from datetime import datetime
 import streamlit as st
+import pandas as pd
 from O365 import Account
 from outlook_auth import get_outlook_account, get_outlook_email, get_outlook_name
 
