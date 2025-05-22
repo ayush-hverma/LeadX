@@ -60,5 +60,7 @@ Werkzeug==3.1.3
 asyncio==3.4.3
 logging==0.4.9.6
 
-msal
-0365
+
+msal==1.27.0
+msgraph-core==0.2.2
+office365-rest-python-client==2.5.0
