@@ -4,7 +4,8 @@ from datetime import datetime
 import streamlit as st
 import pandas as pd
 from O365 import Account
-from outlook_auth import get_outlook_account, get_outlook_email, get_outlook_name
+from outlook_auth import get_outlook_account, get_outlook_email, get_outlook_name, is_outlook_authenticated
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -13,23 +14,47 @@ logger = logging.getLogger(__name__)
 class OutlookSender:
     def __init__(self, batch_size: int = 5):
         self.batch_size = batch_size
-        self.account = get_outlook_account()
+        logger.info("Initializing OutlookSender")
+        try:
+            self.account = get_outlook_account()
+            if not self.account:
+                logger.error("Failed to get Outlook account - account is None")
+                raise ValueError("Outlook account not initialized")
+            logger.info("Successfully initialized Outlook account")
+        except Exception as e:
+            logger.error(f"Error initializing Outlook account: {str(e)}")
+            raise
         
     def create_message(self, to: str, subject: str, body: str, sender_email: str) -> Dict[str, Any]:
         """Create a message for an email."""
         try:
+            if not self.account:
+                logger.error("Outlook account not initialized")
+                raise ValueError("Outlook account not initialized")
+                
             # Create a new message
             mailbox = self.account.mailbox()
+            if not mailbox:
+                logger.error("Failed to get mailbox")
+                raise ValueError("Failed to get mailbox")
+                
             message = mailbox.new_message()
+            if not message:
+                logger.error("Failed to create new message")
+                raise ValueError("Failed to create new message")
             
             # Set message properties
             message.to.add(to)
             message.subject = subject
             
+            # Add recipient's email ID in the header using the correct method
+            message.headers = {'X-Recipient-ID': to}
+            
             # Add recipient's email ID at the top of the body
             modified_body = f"Recipient Email ID: {to}\n\n{body}"
             message.body = modified_body
             
+            logger.info(f"Successfully created message for recipient: {to}")
             return message
         except Exception as e:
             logger.error(f"Error creating message for {to}: {str(e)}")
@@ -121,60 +146,97 @@ def prepare_outlook_email_payloads(generated_emails: List[Dict[str, Any]], enric
     """Convert generated emails into the format required for Outlook sending."""
     payloads = []
     
-    for result in generated_emails:
-        # Check if the result has the required fields
-        if not isinstance(result, dict):
-            continue
-            
-        # Get the final result from the correct structure
-        final_result = result.get("final_result", {})
-        if not final_result:
-            continue
-            
-        # Get lead_id and find email from enriched data
-        lead_id = result.get("lead_id")
-        if not lead_id or enriched_data is None:
-            continue
-            
-        # Get email from enriched data
-        lead_data = enriched_data[enriched_data['lead_id'] == lead_id]
-        if lead_data.empty:
-            continue
-            
-        email = lead_data['email'].iloc[0]
-        subject = final_result.get("subject", "")
-        body = final_result.get("body", "")
-        
-        # Skip if any required field is missing
-        if not all([email, subject, body]):
-            continue
-            
-        # Skip if email is 'N/A'
-        if email == 'N/A':
-            continue
-        
-        # Get sender's information
-        sender_email = get_outlook_email()
-        sender_name = get_outlook_name()
-        
-        # Format the email body with proper closing
-        if sender_name:
-            # Remove any existing "Best regards" or similar closings
-            body = body.replace("Best regards,\n[Your Name]", "")
-            body = body.replace("Best Regards,\n[Your Name]", "")
-            body = body.replace("Best regards,", "")
-            body = body.replace("Best Regards,", "")
-            body = body.strip()
-            
-            # Add the properly formatted closing with the sender's name
-            body = f"{body}\n\nBest Regards,\n{sender_name}"
-        
-        payloads.append({
-            "email": [email],  # API expects a list of emails
-            "subject": subject,
-            "body": body,
-            "sender_email": sender_email,
-            "sender_name": sender_name
-        })
+    logger.info(f"Starting to prepare email payloads. Generated emails count: {len(generated_emails)}")
+    logger.info(f"Enriched data available: {enriched_data is not None}")
     
+    # Check authentication
+    if not is_outlook_authenticated():
+        logger.error("Not authenticated with Outlook")
+        return payloads
+        
+    # Get sender information
+    sender_email = get_outlook_email()
+    sender_name = get_outlook_name()
+    
+    logger.info(f"Sender email: {sender_email}")
+    logger.info(f"Sender name: {sender_name}")
+    
+    if not sender_email:
+        logger.error("No sender email found")
+        return payloads
+    
+    if not generated_emails:
+        logger.error("No generated emails provided")
+        return payloads
+        
+    if enriched_data is None:
+        logger.error("No enriched data provided")
+        return payloads
+    
+    # Log the structure of the first generated email for debugging
+    if generated_emails:
+        logger.info(f"First generated email structure: {json.dumps(generated_emails[0], indent=2)}")
+        logger.info(f"Enriched data columns: {enriched_data.columns.tolist()}")
+        logger.info(f"Sample lead_id from enriched data: {enriched_data['lead_id'].iloc[0] if 'lead_id' in enriched_data.columns else 'No lead_id column'}")
+    
+    for result in generated_emails:
+        try:
+            # Check if the result has the required fields
+            if not isinstance(result, dict):
+                logger.warning(f"Skipping invalid result type: {type(result)}")
+                continue
+                
+            # Get lead_id and find email from enriched data
+            lead_id = result.get("lead_id")
+            if not lead_id:
+                logger.warning(f"No lead_id found in email data: {result}")
+                continue
+                
+            # Get email from enriched data
+            lead_data = enriched_data[enriched_data['lead_id'] == lead_id]
+            if lead_data.empty:
+                logger.warning(f"No matching lead data found for lead_id: {lead_id}")
+                continue
+                
+            email = lead_data['email'].iloc[0]
+            subject = result.get("subject", "")
+            body = result.get("body", "")
+            
+            # Skip if any required field is missing
+            if not all([email, subject, body]):
+                logger.warning(f"Missing required fields for lead_id {lead_id}. Email: {bool(email)}, Subject: {bool(subject)}, Body: {bool(body)}")
+                continue
+                
+            # Skip if email is 'N/A'
+            if email == 'N/A':
+                logger.warning(f"Invalid email 'N/A' for lead_id {lead_id}")
+                continue
+            
+            logger.info(f"Preparing payload for lead_id {lead_id} with email {email}")
+            
+            # Format the email body with proper closing
+            if sender_name:
+                # Remove any existing "Best regards" or similar closings
+                body = body.replace("Best regards,\n[Your Name]", "")
+                body = body.replace("Best Regards,\n[Your Name]", "")
+                body = body.replace("Best regards,", "")
+                body = body.replace("Best Regards,", "")
+                body = body.strip()
+                
+                # Add the properly formatted closing with the sender's name
+                body = f"{body}\n\nBest Regards,\n{sender_name}"
+            
+            payloads.append({
+                "email": [email],  # API expects a list of emails
+                "subject": subject,
+                "body": body,
+                "sender_email": sender_email,
+                "sender_name": sender_name
+            })
+            logger.info(f"Successfully added payload for lead_id {lead_id}")
+        except Exception as e:
+            logger.error(f"Error processing lead_id {lead_id}: {str(e)}")
+            continue
+    
+    logger.info(f"Successfully prepared {len(payloads)} email payloads")
     return payloads 
