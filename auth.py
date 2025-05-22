@@ -168,10 +168,16 @@ def is_authenticated():
 
 
 def get_user_email():
+    from outlook_auth import is_outlook_authenticated, get_outlook_email
+    if is_outlook_authenticated():
+        return get_outlook_email()
     return st.session_state.user_info.get('email') if is_authenticated() else None
 
 
 def get_user_name():
+    from outlook_auth import is_outlook_authenticated, get_outlook_name
+    if is_outlook_authenticated():
+        return get_outlook_name()
     return st.session_state.user_info.get('name') if is_authenticated() else None
 
 
