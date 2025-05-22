@@ -9,6 +9,11 @@ import base64
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from auth import get_gmail_service, get_user_email, get_user_name
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class EmailSender:
     def __init__(self, batch_size: int = 5):
@@ -21,20 +26,24 @@ class EmailSender:
 
     def create_message(self, to: str, subject: str, body: str, sender_email: str) -> Dict[str, Any]:
         """Create a message for an email."""
-        message = MIMEMultipart()
-        message['to'] = to
-        message['from'] = sender_email
-        message['subject'] = subject
-        
-        # Add recipient's email ID at the top of the body
-        modified_body = f"Recipient Email ID: {to}\n\n{body}"
-        
-        # Add the body
-        message.attach(MIMEText(modified_body, 'plain'))
-        
-        # Encode the message
-        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
-        return {'raw': raw_message}
+        try:
+            message = MIMEMultipart()
+            message['to'] = to
+            message['from'] = sender_email
+            message['subject'] = subject
+            
+            # Add recipient's email ID at the top of the body
+            modified_body = f"Recipient Email ID: {to}\n\n{body}"
+            
+            # Add the body
+            message.attach(MIMEText(modified_body, 'plain'))
+            
+            # Encode the message
+            raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
+            return {'raw': raw_message}
+        except Exception as e:
+            logger.error(f"Error creating message for {to}: {str(e)}")
+            raise
 
     async def send_email_batch(self, batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Send a batch of emails using Gmail API."""
@@ -42,10 +51,15 @@ class EmailSender:
         gmail_service = get_gmail_service()
         
         if not gmail_service:
-            return [{"error": "Gmail service not initialized", "status_code": 500}]
+            logger.error("Gmail service not initialized")
+            return [{"error": "Gmail service not initialized. Please sign in again.", "status_code": 500}]
         
         for email_data in batch:
             try:
+                # Validate required fields
+                if not all(key in email_data for key in ['email', 'subject', 'body', 'sender_email']):
+                    raise ValueError("Missing required email fields")
+                
                 # Create the message
                 message = self.create_message(
                     to=email_data['email'][0],
@@ -60,14 +74,19 @@ class EmailSender:
                     body=message
                 ).execute()
                 
+                logger.info(f"Successfully sent email to {email_data['email'][0]}")
                 results.append({
                     "status": "success",
-                    "message_id": sent_message['id']
+                    "message_id": sent_message['id'],
+                    "recipient": email_data['email'][0]
                 })
             except Exception as e:
+                error_msg = str(e)
+                logger.error(f"Error sending email to {email_data.get('email', ['unknown'])[0]}: {error_msg}")
                 results.append({
-                    "error": str(e),
-                    "status_code": 500
+                    "error": error_msg,
+                    "status_code": 500,
+                    "recipient": email_data.get('email', ['unknown'])[0]
                 })
         
         return results
@@ -76,22 +95,41 @@ class EmailSender:
         """Send all emails in batches concurrently."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
+        if not email_payloads:
+            logger.error("No email payloads provided")
+            return {
+                "timestamp": timestamp,
+                "total_emails": 0,
+                "successful": 0,
+                "failed": 0,
+                "error": "No email payloads provided"
+            }
+        
         # Create batches
         batches = [email_payloads[i:i + self.batch_size] 
                   for i in range(0, len(email_payloads), self.batch_size)]
         
         # Process batches
         all_results = []
-        for batch in batches:
+        for batch_num, batch in enumerate(batches, 1):
+            logger.info(f"Processing batch {batch_num} of {len(batches)}")
             results = await self.send_email_batch(batch)
             all_results.extend(results)
         
-        # Return summary
+        # Calculate summary
+        successful = len([r for r in all_results if r.get("status") == "success"])
+        failed = len([r for r in all_results if r.get("error")])
+        
+        # Log summary
+        logger.info(f"Email sending completed. Total: {len(email_payloads)}, Successful: {successful}, Failed: {failed}")
+        
+        # Return detailed summary
         return {
             "timestamp": timestamp,
             "total_emails": len(email_payloads),
-            "successful": len([r for r in all_results if r.get("status") == "success"]),
-            "failed": len([r for r in all_results if r.get("error")])
+            "successful": successful,
+            "failed": failed,
+            "results": all_results
         }
 
 def prepare_email_payloads(generated_emails: List[Dict[str, Any]], enriched_data: pd.DataFrame = None) -> List[Dict[str, Any]]:
