@@ -554,7 +554,7 @@ with tab3:
                     # Display generated emails
                     st.subheader("Generated Emails")
                     for i, email in enumerate(generated_emails, 1):
-                        with st.expander(f"Email {i} - {email.get('subject', 'No Subject')}"):
+                        with st.expander(f"Email {i} - {email.get('final_result', {}).get('subject', 'No Subject')}"):
                             # Try to get recipient email from the generated email dict first
                             recipient_email = email.get('recipient_email')
                             # Fallback: Try to get from enriched data using lead_id
@@ -569,9 +569,9 @@ with tab3:
                                 recipient_email = email.get('email')
                             st.write("To:", recipient_email or "No recipient")
                             st.write("From:", get_user_email() or get_outlook_email() or "No sender")
-                            st.write("Subject:", email.get('subject', 'No subject'))
+                            st.write("Subject:", email.get('final_result', {}).get('subject', 'No subject'))
                             # Format the email body with the sender's name
-                            body = email.get('body', 'No body')
+                            body = email.get('final_result', {}).get('body', 'No body')
                             if not body.endswith('\n'):
                                 body = f"{body}\n"
                             body = f"{body}{sender_name}"
@@ -611,12 +611,14 @@ with tab4:
                 
                 # Prepare email payloads based on authentication method
                 if is_outlook_authenticated():
+                    logger.info("Using Outlook for email sending")
                     email_payloads = prepare_outlook_email_payloads(
                         st.session_state.generated_emails,
                         st.session_state.enriched_data
                     )
                     email_sender = OutlookSender()
                 else:
+                    logger.info("Using Gmail for email sending")
                     email_payloads = prepare_email_payloads(
                         st.session_state.generated_emails,
                         st.session_state.enriched_data
@@ -624,7 +626,8 @@ with tab4:
                     email_sender = EmailSender()
                 
                 if not email_payloads:
-                    st.error("No valid email payloads to send.")
+                    logger.error("No valid email payloads to send.")
+                    st.error("No valid email payloads to send. Please check the logs for details.")
                     st.stop()
                 
                 # Send emails
