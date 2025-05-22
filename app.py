@@ -22,6 +22,7 @@ import google.generativeai as genai
 import msal
 import requests
 from outlook_sender import prepare_outlook_email_payloads, OutlookSender
+from outlook_auth import get_outlook_name
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -531,10 +532,7 @@ with tab3:
                 pipeline = EmailGenerationPipeline()
                 
                 # Get sender's information
-                sender_name = get_user_name()
-                if not sender_name:
-                    logger.warning("No sender name found in session")
-                    sender_name = "User"
+                sender_name = get_user_name() or get_outlook_name() or ""
                 
                 # Generate emails for each lead
                 generated_emails = []
@@ -557,25 +555,26 @@ with tab3:
                     st.subheader("Generated Emails")
                     for i, email in enumerate(generated_emails, 1):
                         with st.expander(f"Email {i} - {email.get('subject', 'No Subject')}"):
-                            # Get the recipient email from enriched data
-                            lead_id = email.get('lead_id')
-                            recipient_email = None
-                            if lead_id and st.session_state.enriched_data is not None:
-                                lead_data = st.session_state.enriched_data[st.session_state.enriched_data['lead_id'] == lead_id]
-                                if not lead_data.empty:
-                                    recipient_email = lead_data['email'].iloc[0]
-                            
+                            # Try to get recipient email from the generated email dict first
+                            recipient_email = email.get('recipient_email')
+                            # Fallback: Try to get from enriched data using lead_id
+                            if not recipient_email:
+                                lead_id = email.get('lead_id')
+                                if lead_id and st.session_state.enriched_data is not None:
+                                    lead_data = st.session_state.enriched_data[st.session_state.enriched_data['lead_id'] == lead_id]
+                                    if not lead_data.empty:
+                                        recipient_email = lead_data['email'].iloc[0]
+                            # Fallback: Try to get from any 'email' field directly
+                            if not recipient_email:
+                                recipient_email = email.get('email')
                             st.write("To:", recipient_email or "No recipient")
-                            st.write("From:", get_user_email() or "No sender")
+                            st.write("From:", get_user_email() or get_outlook_email() or "No sender")
                             st.write("Subject:", email.get('subject', 'No subject'))
-                            
                             # Format the email body with the sender's name
                             body = email.get('body', 'No body')
-                            # Add sender's name after "Best Regards,"
                             if not body.endswith('\n'):
                                 body = f"{body}\n"
                             body = f"{body}{sender_name}"
-                            
                             st.write("Body:", body)
                     
                     # Download generated emails
