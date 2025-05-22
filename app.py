@@ -21,6 +21,7 @@ import os
 import google.generativeai as genai
 import msal
 import requests
+from outlook_sender import prepare_outlook_email_payloads, OutlookSender
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -604,41 +605,46 @@ with tab4:
     else:
         if not st.session_state.email_sending_completed:
             if st.button("Send Emails"):
-                # Get the sender's email and name
-                sender_email = get_user_email()
-                sender_name = get_user_name()
-                
-                if not sender_email:
-                    st.error("No sender email found. Please sign in with Google.")
+                # Check if user is authenticated with either Gmail or Outlook
+                if not (is_authenticated() or is_outlook_authenticated()):
+                    st.error("Please sign in with either Google or Outlook to send emails.")
                     st.stop()
                 
-                # Prepare email payloads
-                email_payloads = prepare_email_payloads(
-                    st.session_state.generated_emails,
-                    st.session_state.enriched_data
-                )
+                # Prepare email payloads based on authentication method
+                if is_outlook_authenticated():
+                    email_payloads = prepare_outlook_email_payloads(
+                        st.session_state.generated_emails,
+                        st.session_state.enriched_data
+                    )
+                    email_sender = OutlookSender()
+                else:
+                    email_payloads = prepare_email_payloads(
+                        st.session_state.generated_emails,
+                        st.session_state.enriched_data
+                    )
+                    email_sender = EmailSender()
                 
-                # Add sender information to each email
-                for payload in email_payloads:
-                    # Add sender information to the email body
-                    if sender_name:
-                        if not payload["body"].endswith('\n'):
-                            payload["body"] = f"{payload['body']}\n"
-                        payload["body"] = f"{payload['body']}{sender_name}"
-                    payload["sender_email"] = sender_email
-                    payload["sender_name"] = sender_name
+                if not email_payloads:
+                    st.error("No valid email payloads to send.")
+                    st.stop()
                 
                 # Send emails
-                email_sender = EmailSender()
                 results = asyncio.run(email_sender.send_emails(email_payloads))
                 
                 st.session_state.email_sending_results = results
                 st.session_state.email_sending_completed = True
                 
-                st.success(f"Emails sent successfully! Total emails: {results['total_emails']}")
+                if results.get("error"):
+                    st.error(f"Error sending emails: {results['error']}")
+                else:
+                    st.success(f"Emails sent successfully! Total emails: {results['total_emails']}")
+                    if results['failed'] > 0:
+                        st.warning(f"{results['failed']} emails failed to send. Check the logs for details.")
         else:
             st.success("Emails have been sent!")
             st.write(f"Total emails sent: {st.session_state.email_sending_results['total_emails']}")
+            if st.session_state.email_sending_results.get('failed', 0) > 0:
+                st.warning(f"{st.session_state.email_sending_results['failed']} emails failed to send.")
 
 # Update pipeline information
 with st.expander("Pipeline Information"):
