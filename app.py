@@ -13,6 +13,7 @@ import dotenv
 import logging
 from personalised_email import product_database, generate_email_for_single_lead, generate_email_for_multiple_leads
 from auth import init_auth, is_authenticated, get_google_auth_url, handle_auth_callback, get_user_email, get_user_name, logout, log_sign_in_attempt
+from outlook_auth import init_outlook_auth, get_outlook_auth_url, handle_outlook_callback, is_outlook_authenticated, get_outlook_email
 from urllib.parse import parse_qs, urlparse
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -32,6 +33,7 @@ dotenv.load_dotenv()
 
 # Initialize authentication
 init_auth()
+init_outlook_auth()
 
 # Set page config
 st.set_page_config(page_title="Apollo.io People Pipeline", layout="wide")
@@ -52,7 +54,13 @@ def handle_auth_flow():
     if 'code' in query_params:
         code = query_params['code']
         logger.info(f"Received auth code: {code}")
-        user_info = handle_auth_callback(code)
+        
+        # Check if this is an Outlook auth callback
+        if 'state' in query_params and query_params['state'] == 'outlook_auth':
+            user_info = handle_outlook_callback(code)
+        else:
+            user_info = handle_auth_callback(code)
+            
         if user_info:
             # Clear query parameters and rerun
             st.query_params.clear()
@@ -63,25 +71,47 @@ def handle_auth_flow():
     else:
         # Show login page
         st.title("Welcome to LeadX")
-        st.write("Please sign in with your Google account to continue.")
+        st.write("Please sign in with your account to continue.")
         
-        try:
-            # Create login button
-            auth_url = get_google_auth_url()
-            if auth_url:
-                logger.info("Successfully generated auth URL")
-                log_sign_in_attempt()
-                st.markdown(f'<a href="{auth_url}" target="_self"><button style="background-color: #4285F4; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer;">Sign in with Google</button></a>', unsafe_allow_html=True)
-            else:
-                logger.error("Failed to generate auth URL - URL is None")
-                st.error("Failed to generate authentication URL. Please check your client_secrets.json file.")
-        except Exception as e:
-            logger.error(f"Error generating auth URL: {str(e)}", exc_info=True)
-            st.error(f"Authentication error: {str(e)}")
+        # Create a container for the login buttons
+        login_container = st.container()
+        
+        with login_container:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                try:
+                    # Create Google login button
+                    auth_url = get_google_auth_url()
+                    if auth_url:
+                        logger.info("Successfully generated Google auth URL")
+                        log_sign_in_attempt()
+                        st.markdown(f'<a href="{auth_url}" target="_self"><button style="background-color: #4285F4; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; width: 100%;">Sign in with Google</button></a>', unsafe_allow_html=True)
+                    else:
+                        logger.error("Failed to generate Google auth URL - URL is None")
+                        st.error("Failed to generate Google authentication URL.")
+                except Exception as e:
+                    logger.error(f"Error generating Google auth URL: {str(e)}", exc_info=True)
+                    st.error(f"Google authentication error: {str(e)}")
+            
+            with col2:
+                try:
+                    # Create Outlook login button
+                    outlook_auth_url = get_outlook_auth_url()
+                    if outlook_auth_url:
+                        logger.info("Successfully generated Outlook auth URL")
+                        st.markdown(f'<a href="{outlook_auth_url}" target="_self"><button style="background-color: #0078D4; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; width: 100%;">Sign in with Outlook</button></a>', unsafe_allow_html=True)
+                    else:
+                        logger.error("Failed to generate Outlook auth URL - URL is None")
+                        st.error("Failed to generate Outlook authentication URL.")
+                except Exception as e:
+                    logger.error(f"Error generating Outlook auth URL: {str(e)}", exc_info=True)
+                    st.error(f"Outlook authentication error: {str(e)}")
+        
         st.stop()
 
-# Check if user is authenticated or forced to sign in
-if not is_authenticated() or st.session_state.get("force_sign_in", False):
+# Check if user is authenticated with either Google or Outlook
+if not (is_authenticated() or is_outlook_authenticated()) or st.session_state.get("force_sign_in", False):
     st.session_state["force_sign_in"] = False
     handle_auth_flow()
     st.stop()
@@ -91,9 +121,12 @@ st.title("Apollo.io People Pipeline")
 
 # Add user info and logout button in the sidebar
 with st.sidebar:
-    st.write(f"Signed in as: {get_user_email()}")
+    # Show the appropriate email based on authentication method
+    user_email = get_user_email() if is_authenticated() else get_outlook_email()
+    st.write(f"Signed in as: {user_email}")
     if st.button("Logout"):
-        logout()
+        if is_authenticated():
+            logout()
         # Clear query params to avoid invalid_grant error
         st.query_params.clear()
         st.session_state["force_sign_in"] = True
