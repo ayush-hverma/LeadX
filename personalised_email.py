@@ -797,7 +797,7 @@ At CoinDCX, we're leading India towards the decentralized future of Web3 with an
     print(type(single_email))
 
     outlook_auth_url = get_outlook_auth_url()
-    st.markdown(f"[**Sign in with Outlook**]({outlook_auth_url})", unsafe_allow_html=True)
+    st.markdown(f'<a href="{outlook_auth_url}" target="_blank"><b>Sign in with Outlook</b></a>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
