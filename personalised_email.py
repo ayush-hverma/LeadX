@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 import json
 import re
 import logging
+import streamlit as st
+from outlook_auth import get_outlook_auth_url
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -794,6 +796,8 @@ At CoinDCX, we're leading India towards the decentralized future of Web3 with an
     print(single_email)
     print(type(single_email))
 
+    outlook_auth_url = get_outlook_auth_url()
+    st.markdown(f'<a href="{outlook_auth_url}" target="_self"><button>Sign in with Outlook</button></a>', unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
