@@ -32,6 +32,9 @@ class EmailSender:
             message['from'] = sender_email
             message['subject'] = subject
             
+            # Add recipient's email ID in the header using the correct MIME method
+            message.add_header('X-Recipient-ID', to)
+            
             # Add recipient's email ID at the top of the body
             modified_body = f"Recipient Email ID: {to}\n\n{body}"
             
