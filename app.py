@@ -19,6 +19,8 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 import google.generativeai as genai
+import msal
+import requests
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -46,6 +48,40 @@ redirect_uri = st.secrets["REDIRECT_URI"]
 google_client_secret = st.secrets["GOOGLE_CLIENT_SECRET"]
 google_project_id = st.secrets["GOOGLE_PROJECT_ID"]
 google_redirect_uris = st.secrets["GOOGLE_REDIRECT_URIS"]
+
+# Azure AD configuration
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+TENANT_ID = os.getenv("TENANT_ID")
+REDIRECT_URI = os.getenv("REDIRECT_URI")
+
+# Microsoft Graph API endpoints
+AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+SCOPE = ["User.Read"]
+
+def init_msal_app():
+    return msal.ConfidentialClientApplication(
+        CLIENT_ID,
+        authority=AUTHORITY,
+        client_credential=CLIENT_SECRET
+    )
+
+def get_auth_url():
+    return f"{AUTHORITY}/oauth2/v2.0/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&scope={' '.join(SCOPE)}"
+
+def get_token_from_code(code):
+    app = init_msal_app()
+    result = app.acquire_token_by_authorization_code(
+        code,
+        scopes=SCOPE,
+        redirect_uri=REDIRECT_URI
+    )
+    return result
+
+def get_user_info(access_token):
+    headers = {'Authorization': f'Bearer {access_token}'}
+    response = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers)
+    return response.json()
 
 def handle_auth_flow():
     """Handle the authentication flow."""
@@ -657,6 +693,34 @@ def generate_email():
     except Exception as e:
         print(f"Error generating email: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+def main():
+    # Initialize session state
+    if 'user_info' not in st.session_state:
+        st.session_state.user_info = None
+
+    # Check if we're in the callback
+    if 'code' in st.query_params:
+        code = st.query_params['code']
+        token_result = get_token_from_code(code)
+        
+        if 'access_token' in token_result:
+            user_info = get_user_info(token_result['access_token'])
+            st.session_state.user_info = user_info
+            # Clear the URL parameters
+            st.query_params.clear()
+        else:
+            st.error("Failed to get access token")
+
+    if st.session_state.user_info:
+        st.write("Welcome,", st.session_state.user_info.get('displayName', 'User'))
+        st.write("Email:", st.session_state.user_info.get('userPrincipalName', ''))
+        if st.button("Logout"):
+            st.session_state.user_info = None
+            st.rerun()
+
+if __name__ == "__main__":
+    main()
 
 
 
