@@ -94,7 +94,7 @@ class EmailGenerationPipeline:
         
         # Prepare the lead details
         lead_details = {
-            "lead_id": str(lead.get('lead_id', '')),
+            "lead_id": str(lead.get('id', lead.get('lead_id', ''))),  # Try both 'id' and 'lead_id'
             "name": str(lead.get('name', '')),
             "experience": str(lead.get('experience', '')),
             "education": str(lead.get('education', '')),
@@ -108,15 +108,27 @@ class EmailGenerationPipeline:
             # Generate email using the function from personalised_email.py
             result = generate_email_for_single_lead(lead_details, formatted_product)
             
-            # Add the recipient's email to the result
-            result['to'] = lead.get('email', '')
-            # Add sender information to the result
-            result['sender_name'] = sender_name
-            
-            return result
+            # Wrap the result in the expected structure
+            return {
+                "final_result": {
+                    "subject": result.get("subject", ""),
+                    "body": result.get("body", "")
+                },
+                "lead_id": lead_details["lead_id"],  # Use the lead_id from lead_details
+                "recipient": result.get("recipient", ""),
+                "recipient_email": result.get("recipient_email", "")
+            }
         except Exception as e:
             print(f"❌ Error generating email for {lead.get('name', 'Unknown')}: {str(e)}")
-            return {"error": f"Failed to generate email: {str(e)}"}
+            return {
+                "final_result": {
+                    "subject": "Error generating email",
+                    "body": f"An error occurred while generating the email: {str(e)}\n\n"
+                },
+                "lead_id": lead_details["lead_id"],  # Use the lead_id from lead_details
+                "recipient": lead_details.get("name", ""),
+                "recipient_email": lead_details.get("email", "")
+            }
     
     def get_timestamp(self) -> str:
         """Get current timestamp for file naming"""
