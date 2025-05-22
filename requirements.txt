@@ -61,3 +61,4 @@ asyncio==3.4.3
 logging==0.4.9.6
 
 msal
+0365
