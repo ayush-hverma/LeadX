@@ -98,9 +98,9 @@ def get_outlook_auth_url():
             'code_challenge': code_challenge,
             'code_challenge_method': 'S256',
             'state': 'outlook_auth',
-            'prompt': 'select_account',  # Force account selection
-            'domain_hint': 'organizations',  # Add domain hint for work accounts
-            'login_hint': st.session_state.get('outlook_email', '')  # Add login hint if available
+            'prompt': 'consent',  # Force consent to get refresh token
+            'access_type': 'offline',  # Request refresh token
+            'domain_hint': 'organizations'  # Add domain hint for work accounts
         }
 
         auth_url = f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize?{urllib.parse.urlencode(auth_params)}"
@@ -110,6 +110,74 @@ def get_outlook_auth_url():
     except Exception as e:
         logger.error(f"Error generating Outlook auth URL: {str(e)}")
         st.error("Failed to initialize Outlook authentication")
+        return None
+
+def get_outlook_account():
+    """Get the Outlook account instance"""
+    try:
+        # Get client credentials
+        client_id = st.secrets["OUTLOOK_CLIENT_ID"]["value"]
+        client_secret = st.secrets["OUTLOOK_CLIENT_SECRET"]["value"]
+        
+        # Initialize account
+        account = Account((client_id, client_secret))
+        
+        # Get token from session state
+        token = st.session_state.outlook_token
+        if not token:
+            logger.error("No token found in session state")
+            return None
+            
+        # Set token in account
+        account.connection.token_backend.token = token
+        
+        # Verify token is valid by making a test request
+        try:
+            account.connection.get('https://graph.microsoft.com/v1.0/me')
+            logger.info("Token is valid")
+            return account
+        except Exception as e:
+            logger.error(f"Token validation failed: {str(e)}")
+            # If token is invalid, try to refresh
+            if 'refresh_token' in token:
+                new_token = refresh_outlook_token(token['refresh_token'])
+                if new_token:
+                    st.session_state.outlook_token = new_token
+                    account.connection.token_backend.token = new_token
+                    logger.info("Successfully refreshed token")
+                    return account
+            
+            # If refresh failed or no refresh token, clear session
+            outlook_logout()
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error getting Outlook account: {str(e)}")
+        return None
+
+def refresh_outlook_token(refresh_token):
+    """Refresh the Outlook access token using the refresh token"""
+    try:
+        client_id = st.secrets["OUTLOOK_CLIENT_ID"]["value"]
+        client_secret = st.secrets["OUTLOOK_CLIENT_SECRET"]["value"]
+        
+        token_url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+        token_data = {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'refresh_token': refresh_token,
+            'grant_type': 'refresh_token',
+            'scope': ' '.join(OUTLOOK_SCOPES)
+        }
+        
+        response = requests.post(token_url, data=token_data)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logger.error(f"Token refresh failed: {response.text}")
+            return None
+    except Exception as e:
+        logger.error(f"Error refreshing token: {str(e)}")
         return None
 
 def handle_outlook_callback(code):
@@ -160,6 +228,10 @@ def handle_outlook_callback(code):
         if response.status_code == 200:
             result = response.json()
             if "access_token" in result:
+                if "refresh_token" not in result:
+                    logger.error(f"Token response missing refresh_token: {result}")
+                    st.error("Microsoft did not return a refresh token. Please remove the app from https://myapps.microsoft.com, clear your browser cache, and try again. If the problem persists, check your Azure app registration for offline_access scope and redirect URI.")
+                    return None
                 # Store token in session state
                 st.session_state.outlook_token = result
                 
@@ -191,12 +263,12 @@ def handle_outlook_callback(code):
                     st.error("Failed to get user information")
                     return None
             else:
-                logger.error("Failed to acquire token - no access_token in response")
-                st.error("Failed to acquire token")
+                logger.error(f"Failed to acquire token - missing access_token in response: {result}")
+                st.error(f"Failed to acquire token - missing required tokens. Response: {result}")
                 return None
         else:
             logger.error(f"Token request failed: {response.text}")
-            st.error("Failed to acquire token")
+            st.error(f"Failed to acquire token. Response: {response.text}")
             return None
 
     except Exception as e:
@@ -263,10 +335,6 @@ def get_outlook_email():
 def get_outlook_name():
     """Get authenticated user's name"""
     return st.session_state.outlook_user_info.get('displayName') if is_outlook_authenticated() else None
-
-def get_outlook_account():
-    """Get authenticated Outlook account"""
-    return st.session_state.outlook_account if is_outlook_authenticated() else None
 
 def outlook_logout():
     """Logout from Outlook"""
