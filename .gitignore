@@ -53,3 +53,5 @@ email_results/
 # Client secrets
 client_secrets.json
 
+# Token pickle file
+token.pickle
