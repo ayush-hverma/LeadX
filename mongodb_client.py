@@ -2,16 +2,10 @@ from pymongo import MongoClient
 import os
 import streamlit as st
 
-# Try to get MongoDB URI from Streamlit secrets, else from environment variable
-try:
-    MONGODB_URI = st.secrets["MONGODB_URI"]
-except KeyError:
-    MONGODB_URI = os.environ.get("MONGODB_URI")
-    if not MONGODB_URI:
-        raise RuntimeError(
-            "MONGODB_URI not found in Streamlit secrets or environment variables. "
-            "Set it in .streamlit/secrets.toml or as an environment variable."
-        )
+# Try to get MongoDB URI from Streamlit secrets, fallback to environment variable
+MONGODB_URI = st.secrets.get("MONGODB_URI") or os.getenv("MONGODB_URI")
+if not MONGODB_URI:
+    raise ValueError("MongoDB URI not found in Streamlit secrets or environment variables.")
 
 client = MongoClient(MONGODB_URI)
 db = client['LeadX']  # Use your database name

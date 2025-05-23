@@ -42,7 +42,7 @@ init_auth()
 init_outlook_auth()
 
 # Set page config
-st.set_page_config(page_title="LeadX", layout="wide")
+st.set_page_config(page_title="Apollo.io People Pipeline", layout="wide")
 
 # Example: Accessing secrets from .streamlit/secrets.toml
 apollo_api_key = st.secrets["APOLLO_API_KEY"]
@@ -862,6 +862,13 @@ def main():
             st.query_params.clear()
         else:
             st.error("Failed to get access token")
+
+    if st.session_state.user_info:
+        st.write("Welcome,", st.session_state.user_info.get('displayName', 'User'))
+        st.write("Email:", st.session_state.user_info.get('userPrincipalName', ''))
+        if st.button("Logout"):
+            st.session_state.user_info = None
+            st.rerun()
 
 if __name__ == "__main__":
     main()
