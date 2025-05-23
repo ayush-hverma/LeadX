@@ -54,4 +54,5 @@ email_results/
 client_secrets.json
 
 outlook_code_verifier.pkl
+outlook_token.pkl
 token.pickle

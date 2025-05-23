@@ -190,7 +190,15 @@ def prepare_outlook_email_payloads(generated_emails: List[Dict[str, Any]], enric
     
     # Log the structure of the first generated email for debugging
     if generated_emails:
-        logger.info(f"First generated email structure: {json.dumps(generated_emails[0], indent=2)}")
+        try:
+            def _json_default(obj):
+                import bson
+                if isinstance(obj, bson.ObjectId):
+                    return str(obj)
+                raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+            logger.info(f"First generated email structure: {json.dumps(generated_emails[0], indent=2, default=_json_default)}")
+        except Exception as e:
+            logger.warning(f"Could not log generated email structure due to: {e}")
         logger.info(f"Enriched data columns: {enriched_data.columns.tolist()}")
         logger.info(f"Sample lead_id from enriched data: {enriched_data['lead_id'].iloc[0] if 'lead_id' in enriched_data.columns else 'No lead_id column'}")
     
@@ -260,4 +268,4 @@ def prepare_outlook_email_payloads(generated_emails: List[Dict[str, Any]], enric
             continue
     
     logger.info(f"Successfully prepared {len(payloads)} email payloads")
-    return payloads 
+    return payloads

@@ -4,6 +4,7 @@ import warnings
 import io
 import google.generativeai as genai
 import time
+import asyncio
 from pydantic import BaseModel, Field
 import json
 import re
@@ -703,6 +704,54 @@ def generate_email_for_multiple_leads(leads_list: list, product_details: str) ->
             time.sleep(2)
     
     return all_emails
+
+async def process_lead_email_generation(lead, product_details):
+    """Process email generation for a single lead (async)."""
+    try:
+        return generate_email_for_single_lead(lead, product_details)
+    except Exception as e:
+        logging.error(f"Error processing lead {lead.get('name', 'Unknown')}: {str(e)}")
+        return {
+            'subject': 'Error generating email',
+            'body': f'Error generating personalized email: {str(e)}',
+            'lead_id': str(lead.get('lead_id'))
+        }
+
+def generate_emails_for_leads(leads_data, pipeline, product_details):
+    """
+    Generate emails for multiple leads using the email generation pipeline.
+    
+    Args:
+        leads_data (List[dict]): List of lead data dictionaries
+        pipeline (EmailGenerationPipeline): Instance of email generation pipeline
+        product_details (dict): Product details for email generation
+        
+    Returns:
+        List[dict]: List of generated emails
+    """
+    try:
+        # Format leads data and prepare payloads
+        payloads = []
+        for lead in leads_data:
+            payload = {
+                "lead": lead,
+                "product_details": product_details,
+            }
+            payloads.append(payload)
+        
+        # Run the pipeline asynchronously
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            results = loop.run_until_complete(pipeline.process_all_leads(payloads))
+        finally:
+            loop.close()
+        
+        return results if results else []
+        
+    except Exception as e:
+        st.error(f"Error generating emails: {str(e)}")
+        return []
 
 def main():
     """

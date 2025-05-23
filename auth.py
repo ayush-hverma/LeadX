@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # OAuth2 Configuration via environment variables (no client_secrets.json)
 TOKEN_PICKLE_FILE = "token.pickle"
+GOOGLE_TOKEN_PICKLE_FILE = "google_token.pkl"
 SCOPES = [
     'openid',
     'https://www.googleapis.com/auth/userinfo.email',
@@ -48,15 +49,28 @@ def init_auth():
 
 def load_credentials():
     try:
+        # Try loading from the new Google token file first
+        credentials = load_google_token()
+        if credentials and credentials.valid:
+            return credentials
+        elif credentials and credentials.expired and credentials.refresh_token:
+            try:
+                credentials.refresh(Request())
+                save_google_token(credentials)
+                return credentials
+            except RefreshError as e:
+                logger.error(f"Failed to refresh credentials: {str(e)}")
+                return None
+        # Fallback to the old token.pickle for backward compatibility
         if os.path.exists(TOKEN_PICKLE_FILE):
             with open(TOKEN_PICKLE_FILE, 'rb') as token:
                 credentials = pickle.load(token)
-
             if credentials and credentials.valid:
                 return credentials
             elif credentials and credentials.expired and credentials.refresh_token:
                 try:
                     credentials.refresh(Request())
+                    save_credentials(credentials)
                     return credentials
                 except RefreshError as e:
                     logger.error(f"Failed to refresh credentials: {str(e)}")
@@ -72,6 +86,29 @@ def save_credentials(credentials):
             pickle.dump(credentials, token)
     except Exception as e:
         logger.error(f"Error saving credentials to token file: {str(e)}")
+
+
+def save_google_token(credentials):
+    """Save Google credentials to a dedicated pickle file."""
+    try:
+        with open(GOOGLE_TOKEN_PICKLE_FILE, 'wb') as token:
+            pickle.dump(credentials, token)
+        logger.info("Saved Google token to google_token.pkl")
+    except Exception as e:
+        logger.error(f"Error saving Google token: {str(e)}")
+
+
+def load_google_token():
+    """Load Google credentials from the dedicated pickle file."""
+    try:
+        if os.path.exists(GOOGLE_TOKEN_PICKLE_FILE):
+            with open(GOOGLE_TOKEN_PICKLE_FILE, 'rb') as token:
+                credentials = pickle.load(token)
+            logger.info("Loaded Google token from google_token.pkl")
+            return credentials
+    except Exception as e:
+        logger.error(f"Error loading Google token: {str(e)}")
+    return None
 
 
 def get_google_auth_url():
@@ -121,8 +158,9 @@ def handle_auth_callback(code):
         flow.fetch_token(code=code)
         credentials = flow.credentials
 
-        # Save credentials
+        # Save credentials to both the old and new pickle files
         save_credentials(credentials)
+        save_google_token(credentials)
         st.session_state.credentials = credentials
 
         # Get user info
@@ -199,17 +237,15 @@ def is_authenticated():
 
 
 def get_user_email():
-    from outlook_auth import is_outlook_authenticated, get_outlook_email
-    if is_outlook_authenticated():
-        return get_outlook_email()
-    return st.session_state.user_info.get('email') if is_authenticated() else None
+    if is_authenticated():
+        return st.session_state.user_info.get('email')
+    return None
 
 
 def get_user_name():
-    from outlook_auth import is_outlook_authenticated, get_outlook_name
-    if is_outlook_authenticated():
-        return get_outlook_name()
-    return st.session_state.user_info.get('name') if is_authenticated() else None
+    if is_authenticated():
+        return st.session_state.user_info.get('name')
+    return None
 
 
 def get_gmail_service():
@@ -262,6 +298,11 @@ def logout():
     st.session_state.credentials = None
     st.session_state.gmail_service = None
 
+    try:
+        if os.path.exists(GOOGLE_TOKEN_PICKLE_FILE):
+            os.remove(GOOGLE_TOKEN_PICKLE_FILE)
+    except Exception as e:
+        logger.error(f"Error removing Google token file: {str(e)}")
     try:
         if os.path.exists(TOKEN_PICKLE_FILE):
             os.remove(TOKEN_PICKLE_FILE)

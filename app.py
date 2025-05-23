@@ -191,17 +191,25 @@ if not (is_authenticated() or is_outlook_authenticated()) or st.session_state.ge
     st.stop()
 
 # User is authenticated, show the main app
-st.title("Apollo.io People Pipeline")
+st.title("LeadX- Discover, Enrich, Engage")
+from outlook_auth import get_outlook_name
+from auth import get_user_name, is_authenticated
+if is_authenticated():
+    name = get_user_name()
+    st.write(f"Welcome, {name if name else 'Google User'}")
+else:
+    name = get_outlook_name()
+    st.write(f"Welcome, {name if name else 'Outlook User'}")
 
-# Add user info and logout button in the sidebar
-with st.sidebar:
-    # Show the appropriate email based on authentication method
-    user_email = get_user_email() if is_authenticated() else get_outlook_email()
-    st.write(f"Signed in as: {user_email}")
-    if st.button("Logout"):
+# Remove sidebar user info and logout button
+# Place logout button in the dashboard (main area)
+if is_authenticated() or is_outlook_authenticated():
+    if st.button("Logout", key="dashboard_logout_btn"):
         if is_authenticated():
             logout()
-        # Clear query params to avoid invalid_grant error
+        elif is_outlook_authenticated():
+            from outlook_auth import outlook_logout
+            outlook_logout()
         st.query_params.clear()
         st.session_state["force_sign_in"] = True
         st.rerun()
@@ -257,9 +265,12 @@ def get_product_details(product_name):
     
     return None
 def json_default(obj):
+    import bson
     if isinstance(obj, bson.ObjectId):
         return str(obj)
-    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+    # Add support for other non-serializable types if needed
+    return str(obj)
+# ...existing code...
 
 # Create tabs for different stages (now including Database)
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -350,8 +361,7 @@ with tab5:
         st.info("No enriched leads and generated emails found in the database.")
 
 with tab1:
-    st.title("Apollo.io People Search")
-    st.write("Search for people using Apollo.io API")
+    st.title("People Search")
 
     # Add clear button for search results
     if st.session_state.search_completed:
@@ -574,19 +584,61 @@ with tab3:
     )
     
     leads_data = None
-    
+    selected_leads = None
+
     if data_source == "Use Enriched Data":
         if st.session_state.enrichment_completed and st.session_state.enriched_data is not None:
             st.success("Using enriched data from previous steps")
-            # Convert enriched data to the required format
-            enriched_df = st.session_state.enriched_data
-            leads_data = enriched_df.to_dict('records')
-            st.write("Preview of enriched data:")
-            st.dataframe(enriched_df.head())
+            enriched_df = st.session_state.enriched_data.copy()
+            st.write("Select leads to generate emails for:")
+            # Add a 'Select' checkbox column if not present
+            if 'Select' not in enriched_df.columns:
+                enriched_df.insert(0, 'Select', False)  # Insert as first column
+            else:
+                # Move 'Select' to first column if not already
+                cols = list(enriched_df.columns)
+                if cols[0] != 'Select':
+                    cols.remove('Select')
+                    cols = ['Select'] + cols
+                    enriched_df = enriched_df[cols]
+            # Show editable table with checkboxes
+            edited_df = st.data_editor(
+                enriched_df,
+                use_container_width=True,
+                column_config={
+                    "Select": st.column_config.CheckboxColumn("Select", width="small"),
+                    "name": st.column_config.TextColumn("Name", width="medium"),
+                    "linkedin_url": st.column_config.LinkColumn("LinkedIn", width="medium"),
+                    "title": st.column_config.TextColumn("Title", width="medium"),
+                    "email_status": st.column_config.TextColumn("Email Status", width="small"),
+                    "email": st.column_config.TextColumn("Email", width="medium"),
+                    "organization": st.column_config.TextColumn("Organization", width="medium"),
+                    "company_industry": st.column_config.TextColumn("Industry", width="medium"),
+                    "company_keywords": st.column_config.TextColumn("Keywords", width="large"),
+                    "company_website": st.column_config.LinkColumn("Website", width="medium"),
+                    "company_linkedin": st.column_config.LinkColumn("Company LinkedIn", width="medium"),
+                    "company_twitter": st.column_config.LinkColumn("Twitter", width="medium"),
+                    "company_facebook": st.column_config.LinkColumn("Facebook", width="medium"),
+                    "company_angellist": st.column_config.LinkColumn("AngelList", width="medium"),
+                    "company_size": st.column_config.NumberColumn("Company Size", width="small"),
+                    "company_founded_year": st.column_config.NumberColumn("Founded Year", width="small"),
+                    "company_location": st.column_config.TextColumn("Location", width="medium"),
+                    "education": st.column_config.TextColumn("Education", width="large"),
+                    "experience": st.column_config.TextColumn("Experience", width="large")
+                },
+                disabled=False,
+                key="enriched_leads_editor"
+            )
+            # Get only checked rows
+            selected_leads = edited_df[edited_df['Select']].to_dict('records') if 'Select' in edited_df.columns else []
+            if selected_leads:
+                st.success(f"{len(selected_leads)} leads selected.")
+            else:
+                st.info("No leads selected. Please select leads to enable email generation.")
         else:
             st.warning("No enriched data available. Please complete the enrichment step first or choose to upload new leads data.")
             data_source = "Upload New Leads Data"
-    
+
     if data_source == "Upload New Leads Data":
         # Add file upload section for direct processing
         st.subheader("Upload Leads Data")
@@ -654,22 +706,18 @@ with tab3:
             logger.error(f"Could not find details for product: {selected_product}")
             st.error(f"Could not find details for {selected_product}")
     
-    # Generate emails button
-    if leads_data and st.button("Generate Emails"):
+    # Generate emails button for selected leads
+    leads_to_use = selected_leads if selected_leads is not None and len(selected_leads) > 0 else leads_data
+    if leads_to_use and st.button("Generate Emails for Selected Leads"):
         if not st.session_state.product_details:
             logger.error("No product selected")
             st.error("Please select a product first")
         else:
             with st.spinner("Generating emails..."):
-                # Initialize email generation pipeline
                 pipeline = EmailGenerationPipeline()
-                
-                # Get sender's information
                 sender_name = get_user_name() or get_outlook_name() or ""
-                
-                # Generate emails for each lead
                 generated_emails = []
-                for lead in leads_data:
+                for lead in leads_to_use:
                     try:
                         logger.info(f"Generating email for lead: {lead.get('name', 'Unknown')}")
                         email = pipeline.generate_email(lead, st.session_state.product_details)
@@ -677,14 +725,11 @@ with tab3:
                     except Exception as e:
                         logger.error(f"Error generating email for lead {lead.get('name', 'Unknown')}: {str(e)}")
                         st.error(f"Error generating email for lead {lead.get('name', 'Unknown')}: {str(e)}")
-                
                 if generated_emails:
                     st.session_state.generated_emails = generated_emails
                     st.session_state.mail_generation_completed = True
                     logger.info(f"Successfully generated {len(generated_emails)} emails")
                     st.success("Emails generated successfully!")
-
-                    # Save generated emails to MongoDB Atlas
                     try:
                         inserted_ids = save_generated_emails(generated_emails)
                         logger.info(f"Saved {len(inserted_ids)} generated emails to MongoDB Atlas.")
@@ -692,21 +737,16 @@ with tab3:
                     except Exception as e:
                         logger.error(f"Failed to save generated emails to MongoDB Atlas: {e}")
                         st.error(f"Failed to save generated emails to MongoDB Atlas: {e}")
-
-                    # Display generated emails
                     st.subheader("Generated Emails")
                     for i, email in enumerate(generated_emails, 1):
                         with st.expander(f"Email {i} - {email.get('final_result', {}).get('subject', 'No Subject')}"):
-                            # Try to get recipient email from the generated email dict first
                             recipient_email = email.get('recipient_email')
-                            # Fallback: Try to get from enriched data using lead_id
                             if not recipient_email:
                                 lead_id = email.get('lead_id')
                                 if lead_id and st.session_state.enriched_data is not None:
                                     lead_data = st.session_state.enriched_data[st.session_state.enriched_data['lead_id'] == lead_id]
                                     if not lead_data.empty:
                                         recipient_email = lead_data['email'].iloc[0]
-                            # Fallback: Try to get from any 'email' field directly
                             if not recipient_email:
                                 recipient_email = email.get('email')
                             st.write("To:", recipient_email or "No recipient")
@@ -718,8 +758,6 @@ with tab3:
                                 body = f"{body}\n"
                             body = f"{body}{sender_name}"
                             st.write("Body:", body)
-                    
-                    # Download generated emails
                     emails_json = json.dumps(generated_emails, indent=2, default=json_default)
                     st.download_button(
                         label="Download Generated Emails",
@@ -846,29 +884,69 @@ def generate_email():
 
 
 def main():
-    # Initialize session state
+    # Initialize session state for Google only
     if 'user_info' not in st.session_state:
         st.session_state.user_info = None
 
     # Check if we're in the callback
     if 'code' in st.query_params:
         code = st.query_params['code']
-        token_result = get_token_from_code(code)
-        
-        if 'access_token' in token_result:
-            user_info = get_user_info(token_result['access_token'])
-            st.session_state.user_info = user_info
-            # Clear the URL parameters
-            st.query_params.clear()
+        # Check if this is an Outlook auth callback (state param)
+        if 'state' in st.query_params and st.query_params['state'] == 'outlook_auth':
+            user_info = handle_outlook_callback(code)
+            # handle_outlook_callback already saves the token to file
+            # and returns user_info if successful
+            if user_info:
+                st.query_params.clear()
+                st.success("Outlook authentication successful!")
+                st.rerun()
+            else:
+                st.error("Failed to authenticate with Outlook. Please try again.")
+                st.stop()
         else:
-            st.error("Failed to get access token")
+            # Assume Google auth
+            token_result = get_token_from_code(code)
+            if 'access_token' in token_result:
+                user_info = get_user_info(token_result['access_token'])
+                st.session_state.user_info = user_info
+                st.query_params.clear()
+                st.success("Google authentication successful!")
+                st.rerun()
+            else:
+                st.error("Failed to get access token")
+                st.stop()
 
-    if st.session_state.user_info:
-        st.write("Welcome,", st.session_state.user_info.get('displayName', 'User'))
-        st.write("Email:", st.session_state.user_info.get('userPrincipalName', ''))
+    # Show user info for Google or Outlook
+    # For Google: use session_state.user_info
+    # For Outlook: use get_outlook_name/get_outlook_email (file-based)
+    if is_authenticated() and st.session_state.user_info:
+        st.write("Welcome,", st.session_state.user_info.get('name', 'User'))
+        st.write("Email:", st.session_state.user_info.get('email', ''))
         if st.button("Logout"):
             st.session_state.user_info = None
             st.rerun()
+    elif is_outlook_authenticated():
+        from outlook_auth import get_outlook_name, get_outlook_email
+        name = get_outlook_name()
+        email = get_outlook_email()
+        st.write(f"Signed in as: {email if email else ''}")
+        # Only show Outlook info if authenticated with Outlook
+        if is_outlook_authenticated():
+            # Clean up any Google session state and token file BEFORE fetching Outlook email
+            for k in ["user_info", "credentials", "gmail_service"]:
+                if k in st.session_state:
+                    st.session_state[k] = None
+            import os
+            if os.path.exists('token.pickle'):
+                os.remove('token.pickle')
+            if os.path.exists('google_token.pkl'):
+                os.remove('google_token.pkl')
+            user_email = None
+            from outlook_auth import get_outlook_email
+            if hasattr(st.session_state, 'user_info'):
+                st.session_state.user_info = None
+            user_email = get_outlook_email()  # Only Outlook email
+            st.write(f"Signed in as: {user_email if user_email else ''}")
 
 if __name__ == "__main__":
     main()
