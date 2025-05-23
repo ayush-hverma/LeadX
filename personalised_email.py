@@ -851,4 +851,21 @@ At CoinDCX, we're leading India towards the decentralized future of Web3 with an
 if __name__ == "__main__":
     main()
 
+def get_product_details(product_name):
+    # Convert product name to lowercase for case-insensitive matching
+    product_name = product_name.lower()
+    try:
+        for key, value in product_database.items():
+            if key.lower() == product_name:
+                return value
+    except Exception as e:
+        # If running in Streamlit context, show error, else just print
+        try:
+            import streamlit as st
+            st.error(f"Error getting product details: {str(e)}")
+        except ImportError:
+            print(f"Error getting product details: {str(e)}")
+        return None
+    return None
+
 
