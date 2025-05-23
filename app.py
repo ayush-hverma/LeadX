@@ -346,17 +346,6 @@ with tab5:
                     if st.button("Show Generated Email", key=f"show_email_{idx}"):
                         st.write(f"**Subject:** {subject}")
                         st.write(f"**Body:**\n{body}")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.button("Copy Email", key=f"copy_{idx}")
-                with col2:
-                    st.download_button(
-                        label="Download Email as TXT",
-                        data=f"Subject: {subject}\n\n{body}",
-                        file_name=f"email_{row['lead_id']}.txt",
-                        mime="text/plain",
-                        key=f"download_{idx}"
-                    )
     else:
         st.info("No enriched leads and generated emails found in the database.")
 
@@ -601,6 +590,12 @@ with tab3:
                     cols.remove('Select')
                     cols = ['Select'] + cols
                     enriched_df = enriched_df[cols]
+            # --- Select All Checkbox ---
+            select_all = st.checkbox("Select All", value=False, key="select_all_checkbox")
+            if select_all:
+                enriched_df['Select'] = True
+            else:
+                enriched_df['Select'] = False
             # Show editable table with checkboxes
             edited_df = st.data_editor(
                 enriched_df,
@@ -634,7 +629,7 @@ with tab3:
             if selected_leads:
                 st.success(f"{len(selected_leads)} leads selected.")
             else:
-                st.info("No leads selected. Please select leads to enable email generation.")
+                st.info("No leads selected. If you proceed, emails will be generated for all leads.")
         else:
             st.warning("No enriched data available. Please complete the enrichment step first or choose to upload new leads data.")
             data_source = "Upload New Leads Data"
@@ -706,12 +701,15 @@ with tab3:
             logger.error(f"Could not find details for product: {selected_product}")
             st.error(f"Could not find details for {selected_product}")
     
-    # Generate emails button for selected leads
+    # Generate mails button is always visible
+    generate_mails_clicked = st.button("Generate mails")
     leads_to_use = selected_leads if selected_leads is not None and len(selected_leads) > 0 else leads_data
-    if leads_to_use and st.button("Generate Emails for Selected Leads"):
+    if generate_mails_clicked:
         if not st.session_state.product_details:
             logger.error("No product selected")
             st.error("Please select a product first")
+        elif not leads_to_use or len(leads_to_use) == 0:
+            st.error("No leads available. Please select or upload leads first.")
         else:
             with st.spinner("Generating emails..."):
                 pipeline = EmailGenerationPipeline()
@@ -929,7 +927,7 @@ def main():
         from outlook_auth import get_outlook_name, get_outlook_email
         name = get_outlook_name()
         email = get_outlook_email()
-        st.write(f"Signed in as: {email if email else ''}")
+        # Removed duplicate 'Signed in as' lines at the bottom of the dashboard
         # Only show Outlook info if authenticated with Outlook
         if is_outlook_authenticated():
             # Clean up any Google session state and token file BEFORE fetching Outlook email
@@ -946,7 +944,7 @@ def main():
             if hasattr(st.session_state, 'user_info'):
                 st.session_state.user_info = None
             user_email = get_outlook_email()  # Only Outlook email
-            st.write(f"Signed in as: {user_email if user_email else ''}")
+            # Removed duplicate 'Signed in as' lines
 
 if __name__ == "__main__":
     main()
