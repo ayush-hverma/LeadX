@@ -863,13 +863,6 @@ def main():
         else:
             st.error("Failed to get access token")
 
-    if st.session_state.user_info:
-        st.write("Welcome,", st.session_state.user_info.get('displayName', 'User'))
-        st.write("Email:", st.session_state.user_info.get('userPrincipalName', ''))
-        if st.button("Logout"):
-            st.session_state.user_info = None
-            st.rerun()
-
 if __name__ == "__main__":
     main()
 
