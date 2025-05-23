@@ -85,6 +85,40 @@ def get_user_info(access_token):
     response = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers)
     return response.json()
 
+# Azure AD configuration
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+TENANT_ID = os.getenv("TENANT_ID")
+REDIRECT_URI = os.getenv("REDIRECT_URI")
+
+# Microsoft Graph API endpoints
+AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+SCOPE = ["User.Read"]
+
+def init_msal_app():
+    return msal.ConfidentialClientApplication(
+        CLIENT_ID,
+        authority=AUTHORITY,
+        client_credential=CLIENT_SECRET
+    )
+
+def get_auth_url():
+    return f"{AUTHORITY}/oauth2/v2.0/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&scope={' '.join(SCOPE)}"
+
+def get_token_from_code(code):
+    app = init_msal_app()
+    result = app.acquire_token_by_authorization_code(
+        code,
+        scopes=SCOPE,
+        redirect_uri=REDIRECT_URI
+    )
+    return result
+
+def get_user_info(access_token):
+    headers = {'Authorization': f'Bearer {access_token}'}
+    response = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers)
+    return response.json()
+
 def handle_auth_flow():
     """Handle the authentication flow."""
     # Check if we're handling the OAuth callback
