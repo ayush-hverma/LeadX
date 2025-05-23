@@ -158,7 +158,7 @@ def handle_auth_flow():
                     if auth_url:
                         logger.info("Successfully generated Google auth URL")
                         log_sign_in_attempt()
-                        st.markdown(f'<a href="{auth_url}" target="_self"><button style="background-color: #4285F4; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; width: 100%;">Sign in with Google</button></a>', unsafe_allow_html=True)
+                        st.markdown(f'<a href="{auth_url}" target="_blank"><button style="background-color: #4285F4; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; width: 100%;">Sign in with Google</button></a>', unsafe_allow_html=True)
                     else:
                         logger.error("Failed to generate Google auth URL - URL is None")
                         st.error("Failed to generate Google authentication URL.")
@@ -172,7 +172,7 @@ def handle_auth_flow():
                     outlook_auth_url = get_outlook_auth_url()
                     if outlook_auth_url:
                         logger.info("Successfully generated Outlook auth URL")
-                        st.markdown(f'<a href="{outlook_auth_url}" target="_self"><button style="background-color: #0078D4; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; width: 100%;">Sign in with Outlook</button></a>', unsafe_allow_html=True)
+                        st.markdown(f'<a href="{outlook_auth_url}" target="_blank"><button style="background-color: #0078D4; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; width: 100%;">Sign in with Outlook</button></a>', unsafe_allow_html=True)
                     else:
                         logger.error("Failed to generate Outlook auth URL - URL is None")
                         st.error("Failed to generate Outlook authentication URL.")
