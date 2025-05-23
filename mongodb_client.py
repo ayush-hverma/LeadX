@@ -1,5 +1,6 @@
 from pymongo import MongoClient
 import os
+import streamlit as st
 
 # Use only environment variable for MongoDB URI
 MONGODB_URI = os.getenv('MONGODB_URI')
