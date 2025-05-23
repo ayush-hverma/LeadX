@@ -3,7 +3,7 @@ import os
 import streamlit as st
 
 # Try to get MongoDB URI from Streamlit secrets, fallback to environment variable
-MONGODB_URI = mongodb+srv://ayu5hhverma03:ayush2503@leadx.mnrxujx.mongodb.net/?retryWrites=true&w=majority&appName=LeadX
+MONGODB_URI = st.secrets.get("MONGODB_URI") or os.getenv("MONGODB_URI")
 if not MONGODB_URI:
     raise ValueError("MongoDB URI not found in Streamlit secrets or environment variables.")
 
