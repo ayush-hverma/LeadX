@@ -116,3 +116,11 @@ if __name__ == "__main__":
         # Optionally save to CSV
         # df.to_csv('apollo_people_data.csv', index=False)
         # print("\nData saved to apollo_people_data.csv")
+
+        # Save enriched data to MongoDB Atlas
+        from mongodb_client import save_enriched_data
+        data_dicts = df.to_dict('records')
+        inserted_ids = save_enriched_data(data_dicts)
+        print(f"\nSaved {len(inserted_ids)} records to MongoDB Atlas.")
+    else:
+        print("No data to save.")

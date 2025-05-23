@@ -23,6 +23,8 @@ import msal
 import requests
 from outlook_sender import prepare_outlook_email_payloads, OutlookSender
 from outlook_auth import get_outlook_name
+from mongodb_client import save_enriched_data, save_generated_emails, collection, generated_emails_collection
+import bson
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -40,7 +42,7 @@ init_auth()
 init_outlook_auth()
 
 # Set page config
-st.set_page_config(page_title="Apollo.io People Pipeline", layout="wide")
+st.set_page_config(page_title="LeadX", layout="wide")
 
 # Example: Accessing secrets from .streamlit/secrets.toml
 apollo_api_key = st.secrets["APOLLO_API_KEY"]
@@ -254,9 +256,98 @@ def get_product_details(product_name):
         return None
     
     return None
+def json_default(obj):
+    if isinstance(obj, bson.ObjectId):
+        return str(obj)
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
-# Create tabs for different stages
-tab1, tab2, tab3, tab4 = st.tabs(["People Search", "People Enrichment", "Mail Generation", "Send Emails"])
+# Create tabs for different stages (now including Database)
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "People Search",
+    "People Enrichment",
+    "Mail Generation",
+    "Send Emails",
+    "Database"
+])
+
+from mongodb_client import collection, generated_emails_collection
+
+def fetch_enriched_leads():
+    try:
+        leads = list(collection.find())
+        return pd.DataFrame(leads) if leads else None
+    except Exception as e:
+        st.error(f"Error fetching enriched leads: {e}")
+        return None
+
+def fetch_generated_emails():
+    try:
+        emails = list(generated_emails_collection.find())
+        return pd.DataFrame(emails) if emails else None
+    except Exception as e:
+        st.error(f"Error fetching generated emails: {e}")
+        return None
+
+with tab5:
+    st.title("Enriched Leads & Generated Emails")
+    enriched_df = fetch_enriched_leads()
+    emails_df = fetch_generated_emails()
+    if enriched_df is not None and emails_df is not None:
+        # Merge on lead_id
+        merged_df = pd.merge(enriched_df, emails_df, left_on='lead_id', right_on='lead_id', how='left', suffixes=('', '_email'))
+        # Helper to extract subject/body from possibly-nested MongoDB structure
+        def extract_email_field(row, field):
+            # Try nested 'final_result' dict
+            if isinstance(row.get('final_result'), dict):
+                return row['final_result'].get(field, '')
+            # Try flat key
+            if field in row:
+                return row[field]
+            # Try with '_email' suffix
+            if f'{field}_email' in row:
+                return row[f'{field}_email']
+            return ''
+        # Search bar
+        search_query = st.text_input("Search leads (name, email, company, subject, etc.)", "")
+        if search_query:
+            mask = (
+                merged_df['name'].str.contains(search_query, case=False, na=False) |
+                merged_df['email'].str.contains(search_query, case=False, na=False) |
+                merged_df['organization'].str.contains(search_query, case=False, na=False) |
+                merged_df.apply(lambda row: extract_email_field(row, 'subject'), axis=1).str.contains(search_query, case=False, na=False)
+            )
+            filtered_df = merged_df[mask]
+        else:
+            filtered_df = merged_df
+        st.write(f"Showing {len(filtered_df)} results.")
+        for idx, row in filtered_df.iterrows():
+            with st.expander(f"{row['name']} - {row['organization']} ({row['email']})"):
+                st.write(f"**Title:** {row.get('title', '')}")
+                st.write(f"**Email Status:** {row.get('email_status', '')}")
+                st.write(f"**LinkedIn:** {row.get('linkedin_url', '')}")
+                st.write(f"**Company:** {row.get('organization', '')}")
+                st.write(f"**Industry:** {row.get('company_industry', '')}")
+                st.write(f"**Email:** {row.get('email', '')}")
+                subject = extract_email_field(row, 'subject')
+                body = extract_email_field(row, 'body')
+                st.write(f"**Generated Email Subject:** {subject}")
+                if subject or body:
+                    if st.button("Show Generated Email", key=f"show_email_{idx}"):
+                        st.write(f"**Subject:** {subject}")
+                        st.write(f"**Body:**\n{body}")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.button("Copy Email", key=f"copy_{idx}")
+                with col2:
+                    st.download_button(
+                        label="Download Email as TXT",
+                        data=f"Subject: {subject}\n\n{body}",
+                        file_name=f"email_{row['lead_id']}.txt",
+                        mime="text/plain",
+                        key=f"download_{idx}"
+                    )
+    else:
+        st.info("No enriched leads and generated emails found in the database.")
 
 with tab1:
     st.title("Apollo.io People Search")
@@ -410,7 +501,15 @@ with tab2:
                     final_df = pd.concat(enriched_data, ignore_index=True)
                     st.session_state.enriched_data = final_df
                     st.session_state.enrichment_completed = True
-                    
+
+                    # Save enriched data to MongoDB Atlas
+                    try:
+                        data_dicts = final_df.to_dict('records')
+                        inserted_ids = save_enriched_data(data_dicts)
+                        st.success(f"Saved {len(inserted_ids)} records to MongoDB Atlas.")
+                    except Exception as e:
+                        st.error(f"Failed to save to MongoDB Atlas: {e}")
+
                     # Clear progress indicators
                     progress_bar.empty()
                     status_text.empty()
@@ -584,7 +683,16 @@ with tab3:
                     st.session_state.mail_generation_completed = True
                     logger.info(f"Successfully generated {len(generated_emails)} emails")
                     st.success("Emails generated successfully!")
-                    
+
+                    # Save generated emails to MongoDB Atlas
+                    try:
+                        inserted_ids = save_generated_emails(generated_emails)
+                        logger.info(f"Saved {len(inserted_ids)} generated emails to MongoDB Atlas.")
+                        st.success(f"Saved {len(inserted_ids)} generated emails to MongoDB Atlas.")
+                    except Exception as e:
+                        logger.error(f"Failed to save generated emails to MongoDB Atlas: {e}")
+                        st.error(f"Failed to save generated emails to MongoDB Atlas: {e}")
+
                     # Display generated emails
                     st.subheader("Generated Emails")
                     for i, email in enumerate(generated_emails, 1):
@@ -612,7 +720,7 @@ with tab3:
                             st.write("Body:", body)
                     
                     # Download generated emails
-                    emails_json = json.dumps(generated_emails, indent=2)
+                    emails_json = json.dumps(generated_emails, indent=2, default=json_default)
                     st.download_button(
                         label="Download Generated Emails",
                         data=emails_json,
@@ -735,6 +843,7 @@ def generate_email():
     except Exception as e:
         print(f"Error generating email: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
 
 def main():
     # Initialize session state
