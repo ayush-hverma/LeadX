@@ -2,9 +2,7 @@ from pymongo import MongoClient
 import os
 import streamlit as st
 
-# Use only environment variable for MongoDB URI
-MONGODB_URI = os.getenv('MONGODB_URI')
-MONGODB_URI = st.secrets["MONGODB_URI"] if MONGODB_URI is None else MONGODB_URI
+MONGODB_URI = st.secrets["MONGODB_URI"] # Use Streamlit secrets for MongoDB URI
 client = MongoClient(MONGODB_URI)
 db = client['LeadX']  # Use your database name
 collection = db['enriched_leads']  # Use your collection name
