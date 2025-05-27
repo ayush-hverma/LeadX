@@ -219,12 +219,6 @@ def handle_outlook_callback(code):
                 user_info = get_outlook_user_info(result["access_token"])
                 if user_info:
                     logger.info("Successfully authenticated with Outlook")
-<<<<<<< HEAD
-=======
-                    # Cache user info in session state for reliable access
-                    st.session_state.outlook_user_name = user_info.get('displayName', '')
-                    st.session_state.outlook_user_email = user_info.get('mail', '')
->>>>>>> acf195d (Avasyu commit of email scheduling)
                     return user_info
                 else:
                     logger.error("Failed to get user information")

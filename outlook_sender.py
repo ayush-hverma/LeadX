@@ -252,14 +252,8 @@ def prepare_outlook_email_payloads(generated_emails: List[Dict[str, Any]], enric
                 body = body.replace("Best Regards,", "")
                 body = body.strip()
                 
-<<<<<<< HEAD
                 # Add the properly formatted closing with the sender's name
                 body = f"{body}\n\nBest Regards,\n{sender_name}"
-=======
-                # Add the properly formatted closing with the sender's first name
-                first_name = sender_name.split()[0] if sender_name else ""
-                body = f"{body}\n\nBest Regards,\n{first_name}"
->>>>>>> acf195d (Avasyu commit of email scheduling)
             
             payloads.append({
                 "email": [email],  # API expects a list of emails
