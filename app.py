@@ -201,11 +201,13 @@ else:
     name = get_outlook_name()
     st.write(f"Welcome, {name if name else 'Outlook User'}")
 
-# Sidebar: Show user info and logout button
+# Sidebar: Show user info, my account, and logout button
 with st.sidebar:
     if is_authenticated():
         name = get_user_name()
         st.write(f"Signed in as: {name if name else 'Google User'}")
+        if st.button("My account", key="user_panel_btn_google"):
+            st.session_state['show_user_panel'] = True
         if st.button("Logout", key="sidebar_logout_btn"):
             logout()
             st.query_params.clear()
@@ -215,6 +217,8 @@ with st.sidebar:
         from outlook_auth import get_outlook_name, outlook_logout
         name = get_outlook_name()
         st.write(f"Signed in as: {name if name else 'Outlook User'}")
+        if st.button("My account", key="user_panel_btn_outlook"):
+            st.session_state['show_user_panel'] = True
         if st.button("Logout", key="sidebar_logout_btn"):
             outlook_logout()
             st.query_params.clear()
@@ -255,7 +259,7 @@ PRODUCTS = [
     "ChoiceAI"
 ]
 
-# Remove st.tabs and use sidebar navigation
+# Remove 'People Search by Organization' from sidebar_options
 sidebar_options = [
     "People Search",
     "People Enrichment",
@@ -263,10 +267,6 @@ sidebar_options = [
     "Send Emails"
 ]
 selected_tab = st.sidebar.radio("Navigation", sidebar_options)
-
-# Add User Panel button in sidebar
-if st.sidebar.button("User Panel", key="user_panel_btn"):
-    st.session_state['show_user_panel'] = True
 
 # Show User Panel page if requested
 if st.session_state.get('show_user_panel', False):
@@ -295,372 +295,335 @@ if st.session_state.get('show_user_panel', False):
 # --- People Search Tab ---
 if selected_tab == "People Search":
     st.title("People Search")
-    with st.form("search_form_people_search"):
-        with st.expander("Job Titles", expanded=True):
-            titles_input = st.text_input(
-                "Job Titles ",
-                #value="Partner, Investor",
-                help="Enter job titles separated by commas"
+    tab1, tab2 = st.tabs(["People Search by Job Title", "People Search by Organization"])
+
+    with tab1:
+        with st.form("search_form_people_search"):
+            with st.expander("Job Titles", expanded=True):
+                titles_input = st.text_input(
+                    "Job Titles ",
+                    help="Enter job titles separated by commas"
+                )
+                include_similar_titles = st.checkbox(
+                    "Include Similar Titles",
+                    value=False,
+                    help="Include people with similar job titles in the search results"
+                )
+            with st.expander("Location"):
+                locations_input = st.text_input(
+                    "Locations (comma-separated)",
+                    value="India",
+                    help="Enter locations separated by commas"
+                )
+            with st.expander("Industry"):
+                industries_input = st.text_input(
+                    "Industries (comma-separated)",
+                    help="Enter industries separated by commas"
+                )
+            results_count = st.number_input(
+                "Results (number of people to fetch)",
+                min_value=1,
+                max_value=250,
+                value=5,
+                help="Number of people search results to return"
             )
-            include_similar_titles = st.checkbox(
-                "Include Similar Titles",
-                value=False,
-                help="Include people with similar job titles in the search results"
+            per_page = st.number_input(
+                "Results per page",
+                min_value=1,
+                max_value=100,
+                value=1,
+                help="Number of results to fetch per page from the API (pagination)"
             )
-        with st.expander("Organization Name"):
-            organization_names_input = st.text_input(
-                "Organization name (comma-separated)",
-                help="Enter organization names separated by commas (optional)"
-            )
-        with st.expander("Location"):
-            locations_input = st.text_input(
-                "Locations (comma-separated)",
-                value="India",
-                help="Enter locations separated by commas"
-            )
-        with st.expander("Industry"):
-            industries_input = st.text_input(
-                "Industries (comma-separated)",
-                #value="Venture Capital & Private Equity",
-                help="Enter industries separated by commas"
-            )
-        results_count = st.number_input(
-            "Results (number of people to fetch)",
-            min_value=1,
-            max_value=250,
-            value=5,
-            help="Number of people search results to return"
-        )
-        submitted = st.form_submit_button("Search")
-    if submitted:
-        titles = [title.strip() for title in titles_input.split(",")]
-        locations = [location.strip() for location in locations_input.split(",")]
-        industries = [industry.strip() for industry in industries_input.split(",")]
-        organizations = [c.strip() for c in organization_names_input.split(",") if c.strip()]
-        # Removed keywords
-        with st.spinner("Searching..."):
-            results = get_people_search_results(
-                person_titles=titles,
-                include_similar_titles=include_similar_titles,
-                person_locations=locations,
-                company_names=organizations,
-                company_locations=locations,
-                company_industries=industries,
-                per_page=results_count,
-                page=1
-            )
-            #print(f"[DEBUG] Results returned to UI: {len(results)}")
-            #print(results)
-            if results and isinstance(results, list) and len(results) > 0:
-                st.session_state.search_results = results
-                st.session_state.search_completed = True
+            submitted = st.form_submit_button("Search")
+        if submitted:
+            titles = [title.strip() for title in titles_input.split(",")]
+            locations = [location.strip() for location in locations_input.split(",")]
+            industries = [industry.strip() for industry in industries_input.split(",")]
+            with st.spinner("Searching..."):
+                results = get_people_search_results(
+                    person_titles=titles,
+                    include_similar_titles=include_similar_titles,
+                    person_locations=locations,
+                    company_names=[],  # Organization name removed from search criteria
+                    company_locations=locations,
+                    company_industries=industries,
+                    per_page=per_page,
+                    page=1
+                )
+                if results and isinstance(results, list) and len(results) > 0:
+                    st.session_state.search_results = results
+                    st.session_state.search_completed = True
+                    try:
+                        df = pd.DataFrame(results)
+                        if not df.empty:
+                            st.subheader("Search Results")
+                            st.dataframe(df, use_container_width=True)
+                            csv = df.to_csv(index=False)
+                            st.download_button(
+                                label="Download Search Results as CSV",
+                                data=csv,
+                                file_name="apollo_search_results.csv",
+                                mime="text/csv"
+                            )
+                            st.write(f"Total results: {len(results)}")
+                            st.success("Search completed! Proceed to the Enrichment tab to enrich these profiles.")
+                        else:
+                            st.info("No tabular data to display. Raw results:")
+                            st.write(results)
+                    except Exception as e:
+                        st.error(f"Error displaying results as table: {e}")
+                        st.info("Raw results:")
+                        st.write(results)
+                else:
+                    st.warning("No results found. Try adjusting your search criteria.")
+
+    with tab2:
+        
+        # Step 1: Organization Search
+        with st.form("org_search_form"):
+            st.subheader("Search Organization")
+            org_domain = st.text_input("Organization Domain", help="e.g. panscience.xyz")
+            org_name = st.text_input("Organization Name", help="e.g. PanScience Innovations")
+            org_submitted = st.form_submit_button("Search Organization")
+        if org_submitted:
+            org_payload = {
+                "q_organization_domains_list": [org_domain] if org_domain else [],
+                "q_organization_names_list": [org_name] if org_name else [],
+                "page": 1,
+                "per_page": 10
+            }
+            apollo_org_url = "https://api.apollo.io/api/v1/mixed_companies/search"
+            headers = {
+                "Content-Type": "application/json",
+                "Cache-Control": "no-cache",
+                "X-Api-Key": st.secrets["APOLLO_API_KEY"]
+            }
+            with st.spinner("Searching organizations..."):
                 try:
-                    df = pd.DataFrame(results)
-                    if not df.empty:
-                        st.subheader("Search Results")
-                        st.dataframe(df, use_container_width=True)
-                        csv = df.to_csv(index=False)
+                    import requests
+                    print(f"[ORG SEARCH] POST {apollo_org_url}\nHeaders: {headers}\nPayload: {org_payload}")
+                    org_resp = requests.post(apollo_org_url, headers=headers, json=org_payload)
+                    print(f"[ORG SEARCH] Status Code: {org_resp.status_code}")
+                    print(f"[ORG SEARCH] Response: {org_resp.text}")
+                    org_resp.raise_for_status()
+                    org_data = org_resp.json()
+                    # Use 'accounts' if 'organizations' is empty
+                    orgs = org_data.get("organizations", [])
+                    if not orgs and "accounts" in org_data:
+                        orgs = org_data["accounts"]
+                    if orgs:
+                        org_df = pd.DataFrame([
+                            {
+                                "organization_id": o.get("organization_id") or o.get("id"),
+                                "name": o.get("name"),
+                                "domain": o.get("domain") or o.get("primary_domain"),
+                                "industry": o.get("industry"),
+                                "website_url": o.get("website_url"),
+                                "linkedin_url": o.get("linkedin_url"),
+                                "city": o.get("city"),
+                                "state": o.get("state"),
+                                "country": o.get("country"),
+                                "founded_year": o.get("founded_year"),
+                                "num_contacts": o.get("num_contacts"),
+                            } for o in orgs
+                        ])
+                        st.session_state["org_search_results"] = org_df
+                        st.session_state["org_search_raw"] = orgs
+                        st.subheader("Organization Search Results")
+                        st.dataframe(org_df, use_container_width=True)
+                        csv = org_df.to_csv(index=False)
                         st.download_button(
-                            label="Download Search Results as CSV",
+                            label="Download Organization Results as CSV",
                             data=csv,
-                            file_name="apollo_search_results.csv",
+                            file_name="apollo_organization_search.csv",
                             mime="text/csv"
                         )
-                        st.write(f"Total results: {len(results)}")
-                        st.success("Search completed! Proceed to the Enrichment tab to enrich these profiles.")
+                        org_options = org_df[["organization_id", "name"]].apply(lambda x: f"{x['name']} ({x['organization_id']})", axis=1).tolist()
+                        selected_org = st.selectbox("Select Organization for People Search", org_options, key="org_selectbox")
+                        selected_org_id = org_df.iloc[org_options.index(selected_org)]["organization_id"]
+                        st.session_state["selected_org_id"] = selected_org_id
                     else:
-                        st.info("No tabular data to display. Raw results:")
-                        st.write(results)
+                        st.warning("No organizations found for the given criteria.")
                 except Exception as e:
-                    st.error(f"Error displaying results as table: {e}")
-                    st.info("Raw results:")
-                    st.write(results)
-            else:
-                st.warning("No results found. Try adjusting your search criteria.")
+                    st.error(f"Error searching organizations: {e}")
+        # Step 2: People Search by Organization
+        if st.session_state.get("selected_org_id"):
+            with st.form("people_search_by_org_form"):
+                st.subheader("Step 2: Search People in Organization")
+                job_titles = st.text_input("Job Titles (comma-separated)", help="e.g. CEO, CTO")
+                org_id = st.text_input("Organization ID", value=st.session_state["selected_org_id"], disabled=True)
+                results = st.number_input("Results (number of people to fetch)", min_value=1, max_value=100, value=10)
+                per_page = st.number_input("Results per page", min_value=1, max_value=100, value=10)
+                people_submitted = st.form_submit_button("Search People in Organization")
+            if people_submitted:
+                apollo_people_url = "https://api.apollo.io/api/v1/mixed_people/search"
+                headers = {
+                    "Content-Type": "application/json",
+                    "Cache-Control": "no-cache",
+                    "X-Api-Key": st.secrets["APOLLO_API_KEY"]
+                }
+                # Remove 'results' from payload, use only per_page and page
+                requested_results = int(results)
+                per_page_val = int(per_page)
+                all_people = []
+                page_num = 1
+                while len(all_people) < requested_results:
+                    payload = {
+                        "organization_ids": [st.session_state["selected_org_id"]],
+                        "person_titles": [t.strip() for t in job_titles.split(",") if t.strip()],
+                        "include_similar_titles": True,
+                        "page": page_num,
+                        "per_page": per_page_val
+                    }
+                    import requests
+                    print(f"[PEOPLE SEARCH] POST {apollo_people_url}\nHeaders: {headers}\nPayload: {payload}")
+                    people_resp = requests.post(apollo_people_url, headers=headers, json=payload)
+                    print(f"[PEOPLE SEARCH] Status Code: {people_resp.status_code}")
+                    print(f"[PEOPLE SEARCH] Response: {people_resp.text}")
+                    people_resp.raise_for_status()
+                    people_data = people_resp.json()
+                    people = people_data.get("people", [])
+                    if not people:
+                        break
+                    all_people.extend(people)
+                    if len(people) < per_page_val:
+                        break
+                    page_num += 1
+                # Truncate to requested_results
+                all_people = all_people[:requested_results]
+                if all_people:
+                    people_df = pd.DataFrame([
+                        {
+                            "id": p.get("id"),
+                            "name": f"{p.get('first_name', '')} {p.get('last_name', '')}",
+                            "title": p.get("title"),
+                            "email": p.get("email"),
+                            "linkedin_url": p.get("linkedin_url"),
+                            "organization_id": p.get("organization_id"),
+                            "organization_name": p.get("organization", {}).get("name"),
+                        } for p in all_people
+                    ])
+                    st.session_state["search_results"] = people_df.to_dict(orient="records")
+                    st.session_state["search_completed"] = True
+                    st.subheader("People Search Results")
+                    st.dataframe(people_df, use_container_width=True)
+                    csv = people_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download People Results as CSV",
+                        data=csv,
+                        file_name="apollo_people_by_org_search.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.warning("No people found for the selected organization.")
+
 elif selected_tab == "People Enrichment":
     st.title("People Enrichment")
-    if not st.session_state.search_completed or not st.session_state.search_results:
-        st.warning("Please complete the People Search step first.")
-    else:
-        if st.button("Enrich People Search Data"):
-            with st.spinner("Enriching person data..."):
-                # Fix: Use 'id' if 'lead_id' is missing in search results
-                lead_ids = [lead.get('lead_id', lead.get('id')) for lead in st.session_state.search_results if lead.get('lead_id', lead.get('id'))]
-                if not lead_ids:
-                    st.error("No valid lead IDs found in search results. Please check your search results.")
+    st.write("Enrich your people search results with additional data.")
+    # Only allow enrichment if search results exist
+    if st.session_state.get("search_results"):
+        lead_ids = [lead.get("id") or lead.get("lead_id") for lead in st.session_state["search_results"] if lead.get("id") or lead.get("lead_id")]
+        if st.button("Enrich People Data", key="enrich_btn"):
+            with st.spinner("Enriching data, please wait..."):
+                enriched_df = get_people_data(lead_ids)
+                if not enriched_df.empty:
+                    st.session_state["enriched_data"] = enriched_df
+                    st.session_state["enrichment_completed"] = True
+                    st.success("Enrichment complete!")
+                    st.dataframe(enriched_df, use_container_width=True)
+                    csv = enriched_df.to_csv(index=False)
+                    st.download_button("Download Enriched Data as CSV", csv, "enriched_people.csv", "text/csv")
                 else:
-                    st.info(f"Enriching {len(lead_ids)} leads. Sample IDs: {lead_ids[:5]}")
-                    enriched_df = get_people_data(lead_ids)
-                    if enriched_df is not None and not enriched_df.empty:
-                        # Duplicates Detection
-                        duplicate_mask = enriched_df.apply(lambda row: lead_exists(lead_id=row['lead_id'], email=row['email']), axis=1)
-                        duplicates = enriched_df[duplicate_mask]
-                        new_leads = enriched_df[~duplicate_mask]
-                        if not duplicates.empty:
-                            st.warning(f"{len(duplicates)} duplicate lead(s) detected and skipped. See below:")
-                            st.dataframe(duplicates)
-                        if not new_leads.empty:
-                            from mongodb_client import save_enriched_data
-                            save_enriched_data(new_leads.to_dict('records'), user_email)
-                            st.session_state.enriched_data = new_leads
-                            st.session_state.enrichment_completed = True
-                            st.success("Enrichment complete! Proceed to the Mail Generation tab.")
-                            # Reorder columns: Company name and Profile name first
-                            display_cols = [
-                                'organization',  # Company name
-                                'name',          # Profile name
-                            ] + [col for col in new_leads.columns if col not in ['organization', 'name']]
-                            st.dataframe(new_leads[display_cols])
-                        else:
-                            st.session_state.enriched_data = None
-                            st.session_state.enrichment_completed = False
-                            st.error("All leads are duplicates. No new leads to enrich.")
-                    else:
-                        st.session_state.enriched_data = None
-                        st.session_state.enrichment_completed = False
-                        st.error("Could not enrich the person data. Please check your API key, network connection, and lead IDs. See terminal/logs for details.")
-                        st.info(f"Tried to enrich {len(lead_ids)} leads. Sample IDs: {lead_ids[:5]}")
-        elif st.session_state.enrichment_completed and st.session_state.enriched_data is not None:
-            st.dataframe(st.session_state.enriched_data)
+                    st.warning("No enrichment data found.")
+        # Show previously enriched data if available
+        elif st.session_state.get("enriched_data") is not None:
+            st.dataframe(st.session_state["enriched_data"], use_container_width=True)
+            csv = st.session_state["enriched_data"].to_csv(index=False)
+            st.download_button("Download Enriched Data as CSV", csv, "enriched_people.csv", "text/csv")
+    else:
+        st.info("Please complete a People Search first.")
+
 elif selected_tab == "Mail Generation":
     st.title("Mail Generation")
-    if not st.session_state.enrichment_completed or st.session_state.enriched_data is None:
-        st.warning("Please complete the People Enrichment step first.")
+    st.write("Generate personalized emails for your enriched leads.")
+    if st.session_state.get("enriched_data") is not None and not st.session_state["enriched_data"].empty:
+        product = st.selectbox("Select Product", PRODUCTS)
+        if st.button("Generate Emails", key="generate_emails_btn"):
+            with st.spinner("Generating emails, please wait..."):
+                product_details = get_product_details(product.lower())
+                leads = st.session_state["enriched_data"].to_dict(orient="records")
+                generated_emails = generate_email_for_multiple_leads(leads, json.dumps(product_details))
+                st.session_state["generated_emails"] = generated_emails
+                st.session_state["mail_generation_completed"] = True
+                st.success("Email generation complete!")
+                df = pd.DataFrame(generated_emails)
+                st.dataframe(df, use_container_width=True)
+                csv = df.to_csv(index=False)
+                st.download_button("Download Generated Emails as CSV", csv, "generated_emails.csv", "text/csv")
+        elif st.session_state.get("generated_emails"):
+            df = pd.DataFrame(st.session_state["generated_emails"])
+            st.dataframe(df, use_container_width=True)
+            csv = df.to_csv(index=False)
+            st.download_button("Download Generated Emails as CSV", csv, "generated_emails.csv", "text/csv")
     else:
-        st.subheader("Select Product for Mail Generation")
-        selected_product = st.selectbox("Choose a product", options=PRODUCTS)
-        if st.button("Generate Mail"):
-            with st.spinner("Generating mail for the lead(s)..."):
-                pipeline = EmailGenerationPipeline()
-                leads = st.session_state.enriched_data.to_dict(orient="records")
-                product_details = get_product_details(selected_product)
-                generated_emails = []
-                mail_logs = []
-                for idx, lead in enumerate(leads):
-                    try:
-                        mail = pipeline.generate_email(lead, product_details, product_name=selected_product)
-                        generated_emails.append(mail)
-                        mail_logs.append(f"[SUCCESS] Mail generated for {lead.get('name', lead.get('email', 'Unknown'))}")
-                    except Exception as e:
-                        mail_logs.append(f"[ERROR] Failed for {lead.get('name', lead.get('email', 'Unknown'))}: {str(e)}")
-                st.session_state.generated_emails = generated_emails
-                st.session_state.mail_generation_completed = True
-                # Save generated emails to MongoDB and print logs
-                from mongodb_client import save_generated_emails
-                save_generated_emails(generated_emails, user_email)
-                st.success(f"Mail(s) generated for {len(generated_emails)} lead(s)! Proceed to the Send Emails tab.")
-                # Print mail generation logs in the terminal only
-                for log in mail_logs:
-                    print(log)
-        # Always show generated mails if available
-        if st.session_state.mail_generation_completed and st.session_state.generated_emails:
-            st.write("### Generated Mails")
-            for idx, mail in enumerate(st.session_state.generated_emails):
-                subject = mail['final_result']['subject']
-                body = mail['final_result']['body']
-                lead = st.session_state.enriched_data.iloc[idx].to_dict() if idx < len(st.session_state.enriched_data) else {}
-                from_user = mail.get('from', '')
-                if not from_user and is_outlook_authenticated():
-                    from_user = get_outlook_email() or ''
-                user_name = mail.get('from_name', '') if mail.get('from_name', '') else ''
-                with st.expander(subject):
-                    st.write(f"**To:** {lead.get('email', '')}")
-                    st.write(f"**From:** {from_user}")
-                    st.write(f"**Subject:** {subject}")
-                    # Show the body as generated, then always append the sender's first name on the next line
-                    body_display = body.rstrip()
-                    first_name = ''
-                    if is_outlook_authenticated():
-                        from outlook_auth import get_outlook_name
-                        full_name = get_outlook_name() or ''
-                        first_name = full_name.split()[0] if full_name else ''
-                    elif user_name:
-                        first_name = user_name.split()[0]
-                    if first_name:
-                        # Ensure the name is on the next line after Best Regards,
-                        if body_display.endswith('Best Regards,'):
-                            body_display = f"{body_display}\n{first_name}"
-                        else:
-                            body_display = f"{body_display}\n\n{first_name}"
-                    st.write(f"**Body:**\n{body_display}")
+        st.info("Please complete People Enrichment first.")
+
 elif selected_tab == "Send Emails":
-    st.title(":mailbox_with_mail: Send Emails")
-    st.markdown("""
-    <style>
-    .schedule-card {
-        background: #f8f9fa;
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-    }
-    .stButton>button {
-        font-size: 1.1rem;
-        padding: 0.5rem 1.5rem;
-        border-radius: 8px;
-    }
-    .option-label {
-        font-weight: 600;
-        color: #1a73e8;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    if not st.session_state.mail_generation_completed or not st.session_state.generated_emails:
-        st.warning(":warning: Please complete the Mail Generation step first.")
+    st.title("Send Emails")
+    st.write("Send your generated emails in batches or schedule follow-ups.")
+    if st.session_state.get("generated_emails"):
+        enriched_data = st.session_state.get("enriched_data")
+        payloads = prepare_email_payloads(st.session_state["generated_emails"], enriched_data)
+        if st.button("Send Emails Now", key="send_emails_btn"):
+            with st.spinner("Sending emails, please wait..."):
+                sender = EmailSender()
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(sender.send_emails(payloads))
+                st.session_state["email_sending_completed"] = True
+                st.session_state["email_sending_results"] = result
+                st.success(f"Emails sent! Successful: {result.get('successful', 0)}, Failed: {result.get('failed', 0)}")
+        # --- Scheduled Email Worker UI ---
+        st.subheader("Schedule Follow-up Emails")
+        from mongodb_client import schedule_followup_emails
+        from datetime import datetime, timedelta
+        # User can pick intervals for follow-ups
+        intervals = st.multiselect(
+            "Select follow-up intervals (days after initial email)",
+            options=[0, 3, 8, 17, 24, 30],
+            default=[0, 3, 8, 17, ]
+        )
+        # Pick initial send time
+        initial_time = st.date_input("Initial send date", value=datetime.now().date())
+        initial_hour = st.number_input("Hour (24h)", min_value=0, max_value=23, value=9)
+        initial_minute = st.number_input("Minute", min_value=0, max_value=59, value=0)
+        # Schedule follow-ups
+        if st.button("Schedule Follow-up Emails", key="schedule_followup_btn"):
+            with st.spinner("Scheduling follow-up emails..."):
+                user_email = get_user_email() if is_authenticated() else get_outlook_email()
+                user_name = get_user_name() if is_authenticated() else get_outlook_name()
+                for email in st.session_state["generated_emails"]:
+                    lead_email = email.get("recipient_email") or email.get("email")
+                    base_payload = {"lead_id": email.get("lead_id")}
+                    # Use current time for initial send, then add intervals
+                    send_time = datetime.combine(initial_time, datetime.min.time()) + timedelta(hours=initial_hour, minutes=initial_minute)
+                    prompts_by_day = {i: "" for i in intervals}  # You can customize prompts if needed
+                    schedule_followup_emails(
+                        lead_email=lead_email,
+                        sender_email=user_email,
+                        sender_name=user_name,
+                        initial_time=send_time,
+                        base_payload=base_payload,
+                        prompts_by_day=prompts_by_day,
+                        intervals=intervals
+                    )
+                st.success("Follow-up emails scheduled! The background worker will send them automatically.")
+        elif st.session_state.get("email_sending_results"):
+            result = st.session_state["email_sending_results"]
+            st.success(f"Emails sent! Successful: {result.get('successful', 0)}, Failed: {result.get('failed', 0)}")
+        logger.info(f"Email sending results: {st.session_state.get('email_sending_results', {})}") 
     else:
-        lead = st.session_state.enriched_data.iloc[0].to_dict()
-        email = lead.get('email', '')
-        subject = st.session_state.generated_emails[0]['final_result']['subject']
-        body = st.session_state.generated_emails[0]['final_result']['body']
-        with st.container():
-            st.markdown('<div class="schedule-card">', unsafe_allow_html=True)
-            st.markdown("#### :calendar: Schedule Email")
-            st.markdown("<span class='option-label'>Choose when to send:</span>", unsafe_allow_html=True)
-            schedule_option = st.radio(
-                "",
-                ("Send Now", "Send Tomorrow", "Send Day After Tomorrow", "Custom Date & Time", "Schedule Follow-up Sequence"),
-                horizontal=True,
-                index=0,
-                key="schedule_option_radio"
-            )
-            import datetime
-            scheduled_time = None
-            if schedule_option == "Send Tomorrow":
-                scheduled_time = (datetime.datetime.now() + datetime.timedelta(days=1)).replace(second=0, microsecond=0)
-            elif schedule_option == "Send Day After Tomorrow":
-                scheduled_time = (datetime.datetime.now() + datetime.timedelta(days=2)).replace(second=0, microsecond=0)
-            elif schedule_option == "Custom Date & Time":
-                date = st.date_input(":date: Pick date", value=datetime.date.today(), key="custom_date_input")
-                default_time = st.session_state.get('custom_time_default', (datetime.datetime.now() + datetime.timedelta(hours=1)).time())
-                time_val = st.time_input(":alarm_clock: Pick time", value=default_time, key="custom_time_input")
-                st.session_state['custom_time_default'] = time_val
-                scheduled_time = datetime.datetime.combine(date, time_val)
-                st.info(f"Selected: {scheduled_time.strftime('%A, %d %B %Y at %I:%M %p')}")
-                print(f"[LOG] User selected custom scheduled time: {scheduled_time}")
-                logging.info(f"[LOG] User selected custom scheduled time: {scheduled_time}")
-            elif schedule_option == "Schedule Follow-up Sequence":
-                st.info("You are scheduling a follow-up sequence at 0, 3, 7, 11 days. Below are the previews for each follow-up email that will be sent.")
-                from personalised_email import FOLLOWUP_PROMPTS, generate_email_for_single_lead_with_custom_prompt
-                import json
-                start_date = st.date_input("Start date (first email)", value=datetime.date.today(), key="followup_start_date")
-                start_time = st.time_input("Start time (first email)", value=datetime.datetime.now().time(), key="followup_start_time")
-                initial_time = datetime.datetime.combine(start_date, start_time)
-                st.session_state['followup_initial_time'] = initial_time
-
-                st.markdown('<div style="margin-top:1.5rem"></div>', unsafe_allow_html=True)
-                st.subheader(":mag: Preview Follow-up Emails")
-                lead = st.session_state.enriched_data.iloc[0].to_dict()
-                selected_product = lead.get('product', None) or st.session_state.get('selected_product', None)
-                if not selected_product and 'generated_emails' in st.session_state and st.session_state.generated_emails:
-                    selected_product = st.session_state.generated_emails[0].get('product_name', None)
-                product_details = get_product_details(selected_product) if selected_product else {}
-                if not product_details:
-                    product_details = {}
-                for day in [0, 3, 7, 11]:
-                    st.markdown(f"**Day {day}**", unsafe_allow_html=True)
-                    prompt = FOLLOWUP_PROMPTS.get(day, "")
-                    try:
-                        preview = generate_email_for_single_lead_with_custom_prompt(lead, json.dumps(product_details), prompt, product_name=selected_product)
-                        st.markdown(f"<b>Subject:</b> {preview['subject']}", unsafe_allow_html=True)
-                        st.markdown(f"<b>Body:</b><br><div style='background:#f4f6fb;padding:1rem;border-radius:8px;white-space:pre-wrap'>{preview['body']}</div>", unsafe_allow_html=True)
-                    except Exception as e:
-                        st.warning(f"Could not generate preview for day {day}: {e}")
-                st.markdown('<div style="margin-top:1.5rem"></div>', unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown('<div style="margin-top:1.5rem"></div>', unsafe_allow_html=True)
-        with st.expander(":mag: Preview Email", expanded=True):
-            st.markdown(f"<b>To:</b> {email}", unsafe_allow_html=True)
-            st.markdown(f"<b>Subject:</b> {subject}", unsafe_allow_html=True)
-            st.markdown(f"<b>Body:</b><br><div style='background:#f4f6fb;padding:1rem;border-radius:8px;white-space:pre-wrap'>{body}</div>", unsafe_allow_html=True)
-        st.markdown('<div style="margin-top:1.5rem"></div>', unsafe_allow_html=True)
-        col1, col2 = st.columns([1,2])
-        with col1:
-            send_btn = st.button(
-                ":rocket: Send/Schedule Email",
-                use_container_width=True,
-                key="send_schedule_btn"
-            )
-        with col2:
-            if schedule_option != "Send Now":
-                st.info("Your email will be sent automatically at the scheduled time. You can view scheduled emails in the database tab.")
-        if send_btn:
-            with st.spinner("Processing..."):
-                if is_authenticated() or is_outlook_authenticated():
-                    if schedule_option == "Send Now":
-                        if is_outlook_authenticated():
-                            email_payloads = [{
-                                "email": [email],
-                                "subject": subject,
-                                "body": body,
-                                "sender_email": get_outlook_email(),
-                                "sender_name": get_outlook_name()
-                            }]
-                            email_sender = OutlookSender()
-                        else:
-                            email_payloads = [{
-                                "email": [email],
-                                "subject": subject,
-                                "body": body,
-                                "sender_email": get_user_email(),
-                                "sender_name": get_user_name()
-                            }]
-                            email_sender = EmailSender()
-                        results = asyncio.run(email_sender.send_emails(email_payloads))
-                        if results.get("error"):
-                            st.error(f"Error sending email: {results['error']}")
-                        else:
-                            st.success(":white_check_mark: Email sent successfully!")
-                    elif schedule_option == "Schedule Follow-up Sequence":
-                        from mongodb_client import schedule_followup_emails
-                        prompts_by_day = st.session_state.get('followup_prompts', {})
-                        initial_time = st.session_state.get('followup_initial_time', datetime.datetime.now())
-                        sender_email = get_outlook_email() if is_outlook_authenticated() else get_user_email()
-                        sender_name = get_outlook_name() if is_outlook_authenticated() else get_user_name()
-                        base_payload = {"lead_id": lead.get('lead_id', ''), "name": lead.get('name', '')}
-                        schedule_followup_emails(email, sender_email, sender_name, initial_time, base_payload, prompts_by_day)
-                        st.success(":white_check_mark: Follow-up sequence scheduled!")
-                    else:
-                        from mongodb_client import save_scheduled_email
-                        email_data = {
-                            "email": [email],
-                            "subject": subject,
-                            "body": body,
-                            "sender_email": get_outlook_email() if is_outlook_authenticated() else get_user_email(),
-                            "sender_name": get_outlook_name() if is_outlook_authenticated() else get_user_name(),
-                            "scheduled_time": scheduled_time,
-                            "status": "pending"
-                        }
-                        save_scheduled_email(email_data)
-                        print(f"[LOG] Email scheduled for {scheduled_time}")
-                        logging.info(f"[LOG] Email scheduled for {scheduled_time}")
-                        st.success(f":white_check_mark: Email scheduled for {scheduled_time.strftime('%A, %d %B %Y at %I:%M %p')}")
-                else:
-                    st.warning(":lock: Please sign in with Google or Outlook to send emails.")
-
-# --- Pipeline Information Expander ---
-with st.expander("Pipeline Information"):
-    st.write("""
-    This pipeline consists of three stages:
-    
-    1. **People Search**
-       - Search for people using job titles, locations, and industries
-       - Results include basic profile information
-       - Download search results as CSV
-    
-    2. **People Enrichment**
-       - Enrich the found profiles with additional data
-       - Process lead IDs in batches of 10
-       - Get detailed information including industry and keywords
-       - Download enriched data as CSV
-    
-    3. **Mail Generation**
-       - Upload product information document
-       - Generate personalized emails for each lead
-       - View and download generated emails
-       - Process leads in batches with retry logic
-    
-    Note: Each stage must be completed in sequence. The enrichment and mail generation processes may take some time as they process profiles in batches.
-    """)
+        st.info("Please generate emails first.")
 
 @app.route('/api/generate-email', methods=['POST'])
 def generate_email():
@@ -728,8 +691,6 @@ def main():
     # Show user info for Google or Outlook
     # For Google: use session_state.user_info
     # For Outlook: use get_outlook_name/get_outlook_email (file-based)
-    # REMOVE Google user info and logout button at the bottom
-    # REMOVE Outlook user info and logout button at the bottom
     if is_authenticated() and st.session_state.user_info:
         st.write("Welcome,", st.session_state.user_info.get('name', 'User'))
         st.write("Email:", st.session_state.user_info.get('email', ''))
