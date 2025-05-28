@@ -450,22 +450,29 @@ elif selected_tab == "Mail Generation":
                 body = mail['final_result']['body']
                 lead = st.session_state.enriched_data.iloc[idx].to_dict() if idx < len(st.session_state.enriched_data) else {}
                 from_user = mail.get('from', '')
+                if not from_user and is_outlook_authenticated():
+                    from_user = get_outlook_email() or ''
                 user_name = mail.get('from_name', '') if mail.get('from_name', '') else ''
                 with st.expander(subject):
                     st.write(f"**To:** {lead.get('email', '')}")
                     st.write(f"**From:** {from_user}")
                     st.write(f"**Subject:** {subject}")
-                    # Ensure user's name is on the line after Best Regards, and do not print recipient's name
-                    if "Best Regards," in body:
-                        body_lines = body.splitlines()
-                        new_body_lines = []
-                        for i, line in enumerate(body_lines):
-                            new_body_lines.append(line)
-                            if line.strip() == "Best Regards,":
-                                if user_name:
-                                    new_body_lines.append(user_name)
-                        body = "\n".join(new_body_lines)
-                    st.write(f"**Body:**\n{body}")
+                    # Show the body as generated, then always append the sender's first name on the next line
+                    body_display = body.rstrip()
+                    first_name = ''
+                    if is_outlook_authenticated():
+                        from outlook_auth import get_outlook_name
+                        full_name = get_outlook_name() or ''
+                        first_name = full_name.split()[0] if full_name else ''
+                    elif user_name:
+                        first_name = user_name.split()[0]
+                    if first_name:
+                        # Ensure the name is on the next line after Best Regards,
+                        if body_display.endswith('Best Regards,'):
+                            body_display = f"{body_display}\n{first_name}"
+                        else:
+                            body_display = f"{body_display}\n\n{first_name}"
+                    st.write(f"**Body:**\n{body_display}")
 elif selected_tab == "Send Emails":
     st.title(":mailbox_with_mail: Send Emails")
     st.markdown("""
@@ -501,7 +508,7 @@ elif selected_tab == "Send Emails":
             st.markdown("<span class='option-label'>Choose when to send:</span>", unsafe_allow_html=True)
             schedule_option = st.radio(
                 "",
-                ("Send Now", "Send Tomorrow", "Send Day After Tomorrow", "Custom Date & Time"),
+                ("Send Now", "Send Tomorrow", "Send Day After Tomorrow", "Custom Date & Time", "Schedule Follow-up Sequence"),
                 horizontal=True,
                 index=0,
                 key="schedule_option_radio"
@@ -521,8 +528,34 @@ elif selected_tab == "Send Emails":
                 st.info(f"Selected: {scheduled_time.strftime('%A, %d %B %Y at %I:%M %p')}")
                 print(f"[LOG] User selected custom scheduled time: {scheduled_time}")
                 logging.info(f"[LOG] User selected custom scheduled time: {scheduled_time}")
-            if schedule_option == "Send Now":
-                scheduled_time = datetime.datetime.now()
+            elif schedule_option == "Schedule Follow-up Sequence":
+                st.info("You are scheduling a follow-up sequence at 0, 3, 7, 11 days. Below are the previews for each follow-up email that will be sent.")
+                from personalised_email import FOLLOWUP_PROMPTS, generate_email_for_single_lead_with_custom_prompt
+                import json
+                start_date = st.date_input("Start date (first email)", value=datetime.date.today(), key="followup_start_date")
+                start_time = st.time_input("Start time (first email)", value=datetime.datetime.now().time(), key="followup_start_time")
+                initial_time = datetime.datetime.combine(start_date, start_time)
+                st.session_state['followup_initial_time'] = initial_time
+
+                st.markdown('<div style="margin-top:1.5rem"></div>', unsafe_allow_html=True)
+                st.subheader(":mag: Preview Follow-up Emails")
+                lead = st.session_state.enriched_data.iloc[0].to_dict()
+                selected_product = lead.get('product', None) or st.session_state.get('selected_product', None)
+                if not selected_product and 'generated_emails' in st.session_state and st.session_state.generated_emails:
+                    selected_product = st.session_state.generated_emails[0].get('product_name', None)
+                product_details = get_product_details(selected_product) if selected_product else {}
+                if not product_details:
+                    product_details = {}
+                for day in [0, 3, 7, 11]:
+                    st.markdown(f"**Day {day}**", unsafe_allow_html=True)
+                    prompt = FOLLOWUP_PROMPTS.get(day, "")
+                    try:
+                        preview = generate_email_for_single_lead_with_custom_prompt(lead, json.dumps(product_details), prompt, product_name=selected_product)
+                        st.markdown(f"<b>Subject:</b> {preview['subject']}", unsafe_allow_html=True)
+                        st.markdown(f"<b>Body:</b><br><div style='background:#f4f6fb;padding:1rem;border-radius:8px;white-space:pre-wrap'>{preview['body']}</div>", unsafe_allow_html=True)
+                    except Exception as e:
+                        st.warning(f"Could not generate preview for day {day}: {e}")
+                st.markdown('<div style="margin-top:1.5rem"></div>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('<div style="margin-top:1.5rem"></div>', unsafe_allow_html=True)
         with st.expander(":mag: Preview Email", expanded=True):
@@ -567,6 +600,15 @@ elif selected_tab == "Send Emails":
                             st.error(f"Error sending email: {results['error']}")
                         else:
                             st.success(":white_check_mark: Email sent successfully!")
+                    elif schedule_option == "Schedule Follow-up Sequence":
+                        from mongodb_client import schedule_followup_emails
+                        prompts_by_day = st.session_state.get('followup_prompts', {})
+                        initial_time = st.session_state.get('followup_initial_time', datetime.datetime.now())
+                        sender_email = get_outlook_email() if is_outlook_authenticated() else get_user_email()
+                        sender_name = get_outlook_name() if is_outlook_authenticated() else get_user_name()
+                        base_payload = {"lead_id": lead.get('lead_id', ''), "name": lead.get('name', '')}
+                        schedule_followup_emails(email, sender_email, sender_name, initial_time, base_payload, prompts_by_day)
+                        st.success(":white_check_mark: Follow-up sequence scheduled!")
                     else:
                         from mongodb_client import save_scheduled_email
                         email_data = {

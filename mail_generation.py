@@ -138,7 +138,7 @@ class EmailGenerationPipeline:
                 "recipient": result.get("recipient", ""),
                 "recipient_email": result.get("recipient_email", ""),
                 "from": sender_email,
-                "from_name": first_name
+                "from_name": sender_name  # Use full name for display
             }
         except Exception as e:
             print(f"❌ Error generating email for {lead.get('name', 'Unknown')}: {str(e)}")

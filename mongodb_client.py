@@ -103,3 +103,30 @@ def mark_email_as_sent(email_id):
     Mark a scheduled email as sent.
     """
     scheduled_emails_collection.update_one({'_id': email_id}, {'$set': {'status': 'sent'}})
+
+def schedule_followup_emails(lead_email, sender_email, sender_name, initial_time, base_payload, prompts_by_day, intervals=[0,3,7,11]):
+    """
+    Schedule follow-up emails at specified day intervals if no response is received.
+    prompts_by_day: dict mapping day (int) to prompt string for that day
+    base_payload: dict with any extra fields (e.g., lead_id, etc.)
+    """
+    from datetime import timedelta
+    scheduled_ids = []
+    for day in intervals:
+        scheduled_time = initial_time + timedelta(days=day)
+        email_data = {
+            "email": [lead_email],
+            "subject": "",  # To be filled by Gemini prompt
+            "body": "",      # To be filled by Gemini prompt
+            "sender_email": sender_email,
+            "sender_name": sender_name,
+            "scheduled_time": scheduled_time,
+            "status": "pending",
+            "followup_day": day,
+            "responded": False,
+            "prompt": prompts_by_day.get(day, ""),
+            **base_payload
+        }
+        scheduled_id = save_scheduled_email(email_data)
+        scheduled_ids.append(scheduled_id)
+    return scheduled_ids

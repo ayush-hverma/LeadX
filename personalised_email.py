@@ -748,6 +748,22 @@ def generate_emails_for_leads(leads_data, pipeline, product_details):
         logging.error(f"Error generating emails: {str(e)}")
         return []
 
+# --- Follow-up Email Prompts for Each Interval ---
+FOLLOWUP_PROMPTS = {
+    0: """# Gemini prompt for initial email (0th day)
+# Write your prompt here for the first email
+""",
+    3: """# Gemini prompt for 3rd day follow-up
+# Write your prompt here for the 3rd day follow-up
+""",
+    7: """# Gemini prompt for 7th day follow-up
+# Write your prompt here for the 7th day follow-up
+""",
+    11: """# Gemini prompt for 11th day follow-up
+# Write your prompt here for the 11th day follow-up
+"""
+}
+
 def main():
     """
     Main function to test personalized email generation with sample data
@@ -862,5 +878,89 @@ def get_product_details(product_name):
             print(f"Error getting product details: {str(e)}")
         return None
     return None
+
+def generate_email_for_single_lead_with_custom_prompt(lead_details: dict, product_details: str, custom_prompt: str, product_name: str = None) -> dict:
+    """
+    Generate a personalized email for a single lead using a custom prompt (for follow-ups).
+    """
+    import google.generativeai as genai
+    import json, re, logging
+    try:
+        # Use explicit product_name if provided, else extract from product_details
+        if product_name is None:
+            for key in product_database.keys():
+                if key.lower() in product_details.lower():
+                    product_name = key
+                    break
+            if not product_name:
+                for line in product_details.split('\n'):
+                    if any(key.lower() in line.lower() for key in product_database.keys()):
+                        for key in product_database.keys():
+                            if key.lower() in line.lower():
+                                product_name = key
+                                break
+                        if product_name:
+                            break
+            if not product_name:
+                product_name = "our product"  # Fallback if no product name found
+
+        recipient_name = lead_details.get('name', 'No recipient')
+        recipient_email = lead_details.get('email', 'No email provided')
+
+        # Compose the prompt for Gemini
+        prompt = custom_prompt.format(
+            lead_details=json.dumps({k: v for k, v in lead_details.items() if k != 'id'}, indent=2),
+            product_details=product_details,
+            product_name=product_name,
+            recipient_name=recipient_name,
+            recipient_email=recipient_email
+        )
+
+        # Get response from Gemini
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.1,
+                max_output_tokens=5000,
+            )
+        )
+        # Parse the response
+        try:
+            response_text = response.text
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                response_json = json.loads(json_match.group())
+                body = response_json.get("body", "")
+                body = body.replace("[PRODUCT_NAME]", product_name)
+                if not body.endswith('\n\n'):
+                    body = body.rstrip() + '\n\n'
+                return {
+                    "subject": response_json.get("subject", ""),
+                    "body": body,
+                    "lead_id": lead_details.get("id", ""),
+                    "recipient": recipient_name,
+                    "recipient_email": recipient_email
+                }
+            else:
+                raise ValueError("No JSON found in response")
+        except Exception as e:
+            logging.error(f"Error parsing response: {str(e)}")
+            return {
+                "subject": "Error generating email",
+                "body": f"An error occurred while generating the email: {str(e)}\n\n",
+                "lead_id": lead_details.get("id", ""),
+                "recipient": recipient_name,
+                "recipient_email": recipient_email
+            }
+    except Exception as e:
+        logging.error(f"Error generating email: {str(e)}")
+        return {
+            "subject": "Error generating email",
+            "body": f"An error occurred while generating the email: {str(e)}\n\n",
+            "lead_id": lead_details.get("id", ""),
+            "recipient": lead_details.get('name', ''),
+            "recipient_email": lead_details.get('email', '')
+        }
 
 

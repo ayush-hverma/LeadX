@@ -13,6 +13,9 @@ def run_worker():
             print(f"Found {len(due_emails)} scheduled emails to send...")
         for email in due_emails:
             try:
+                # Skip if responded
+                if email.get('responded'):
+                    continue
                 # Choose sender based on email['sender_email'] (simple check for Outlook vs Gmail)
                 if 'outlook.com' in email['sender_email'] or 'microsoft' in email['sender_email']:
                     sender = OutlookSender()
