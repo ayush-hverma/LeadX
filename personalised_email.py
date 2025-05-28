@@ -756,12 +756,18 @@ FOLLOWUP_PROMPTS = {
     3: """# Gemini prompt for 3rd day follow-up
 # Write your prompt here for the 3rd day follow-up
 """,
-    7: """# Gemini prompt for 7th day follow-up
+    8: """# Gemini prompt for 7th day follow-up
 # Write your prompt here for the 7th day follow-up
 """,
-    11: """# Gemini prompt for 11th day follow-up
+    17: """# Gemini prompt for 11th day follow-up
 # Write your prompt here for the 11th day follow-up
-"""
+""",
+    24: """# Gemini prompt for 30th day follow-up
+# Write your prompt here for the 30th day follow-up 
+""",
+    30: """# Gemini prompt for 60th day follow-up
+# Write your prompt here for the 60th day follow-up
+""",
 }
 
 def main():

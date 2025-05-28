@@ -230,6 +230,23 @@ def handle_outlook_callback(code):
                 return None
         else:
             logger.error(f"Token request failed: {response.text}")
+            # Check for 'invalid_grant' and 'AADSTS54005' in the error response
+            try:
+                error_json = response.json()
+                if (
+                    error_json.get("error") == "invalid_grant" and
+                    "AADSTS54005" in error_json.get("error_description", "")
+                ):
+                    # Remove cached files to force new auth flow
+                    if os.path.exists('outlook_code_verifier.pkl'):
+                        os.remove('outlook_code_verifier.pkl')
+                    if os.path.exists('outlook_token.pkl'):
+                        os.remove('outlook_token.pkl')
+                    logger.info("Cleared cached Outlook auth files due to redeemed code error.")
+                    st.error("Your authentication session expired or was already used. Please try signing in again.")
+                    return None
+            except Exception as parse_err:
+                logger.error(f"Error parsing token error response: {parse_err}")
             st.error(f"Failed to acquire token. Response: {response.text}")
             return None
     except Exception as e:

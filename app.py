@@ -260,30 +260,40 @@ sidebar_options = [
     "People Search",
     "People Enrichment",
     "Mail Generation",
-    "Send Emails",
-    "Database"
+    "Send Emails"
 ]
 selected_tab = st.sidebar.radio("Navigation", sidebar_options)
 
-def fetch_enriched_leads():
-    try:
-        leads = list(collection.find())
-        return pd.DataFrame(leads) if leads else None
-    except Exception as e:
-        st.error(f"Error fetching enriched leads: {e}")
-        return None
+# Add User Panel button in sidebar
+if st.sidebar.button("User Panel", key="user_panel_btn"):
+    st.session_state['show_user_panel'] = True
 
-def fetch_generated_emails():
-    try:
-        emails = list(generated_emails_collection.find())
-        return pd.DataFrame(emails) if emails else None
-    except Exception as e:
-        st.error(f"Error fetching generated emails: {e}")
-        return None
+# Show User Panel page if requested
+if st.session_state.get('show_user_panel', False):
+    st.title("User Panel: Database Viewer")
+    from mongodb_client import fetch_enriched_leads, fetch_generated_emails
+    def get_user_email():
+        return st.session_state.get("user_email") or (get_user_email() if is_authenticated() else get_outlook_email())
+    user_email = get_user_email()
+    st.header("Your Enriched Leads")
+    enriched_df = fetch_enriched_leads(user_email)
+    if enriched_df is not None and not enriched_df.empty:
+        st.dataframe(enriched_df)
+    else:
+        st.info("No enriched leads found for your account.")
+    st.header("Your Generated Emails")
+    emails_df = fetch_generated_emails(user_email)
+    if emails_df is not None and not emails_df.empty:
+        st.dataframe(emails_df)
+    else:
+        st.info("No generated emails found for your account.")
+    if st.button("Back to Main App", key="back_to_main"):
+        st.session_state['show_user_panel'] = False
+        st.experimental_rerun()
+    st.stop()
 
-# Remove st.tabs and tab variables, replace with sidebar logic
+# --- People Search Tab ---
 if selected_tab == "People Search":
-    # --- People Search Tab ---
     st.title("People Search")
     with st.form("search_form_people_search"):
         with st.expander("Job Titles", expanded=True):
@@ -391,7 +401,7 @@ elif selected_tab == "People Enrichment":
                             st.dataframe(duplicates)
                         if not new_leads.empty:
                             from mongodb_client import save_enriched_data
-                            save_enriched_data(new_leads.to_dict('records'))
+                            save_enriched_data(new_leads.to_dict('records'), user_email)
                             st.session_state.enriched_data = new_leads
                             st.session_state.enrichment_completed = True
                             st.success("Enrichment complete! Proceed to the Mail Generation tab.")
@@ -437,7 +447,7 @@ elif selected_tab == "Mail Generation":
                 st.session_state.mail_generation_completed = True
                 # Save generated emails to MongoDB and print logs
                 from mongodb_client import save_generated_emails
-                save_generated_emails(generated_emails)
+                save_generated_emails(generated_emails, user_email)
                 st.success(f"Mail(s) generated for {len(generated_emails)} lead(s)! Proceed to the Send Emails tab.")
                 # Print mail generation logs in the terminal only
                 for log in mail_logs:
@@ -626,67 +636,6 @@ elif selected_tab == "Send Emails":
                         st.success(f":white_check_mark: Email scheduled for {scheduled_time.strftime('%A, %d %B %Y at %I:%M %p')}")
                 else:
                     st.warning(":lock: Please sign in with Google or Outlook to send emails.")
-elif selected_tab == "Database":
-    st.title("Enriched Leads & Generated Emails")
-    enriched_df = fetch_enriched_leads()
-    emails_df = fetch_generated_emails()
-    if enriched_df is not None and emails_df is not None:
-        merged_df = pd.merge(enriched_df, emails_df, left_on='lead_id', right_on='lead_id', how='left', suffixes=('', '_email'))
-        def extract_email_field(row, field):
-            if isinstance(row.get('final_result'), dict):
-                return row['final_result'].get(field, '')
-            if field in row:
-                return row[field]
-            if f'{field}_email' in row:
-                return row[f'{field}_email']
-            return ''
-        filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
-        filter_name = filter_col1.text_input("Filter by Name", "", key="db_filter_name")
-        filter_email = filter_col2.text_input("Filter by Email", "", key="db_filter_email")
-        filter_company = filter_col3.text_input("Filter by Organization", "", key="db_filter_company")
-        filter_industry = filter_col4.text_input("Filter by Industry", "", key="db_filter_industry")
-        filtered_df = merged_df.copy()
-        if filter_name:
-            filtered_df = filtered_df[filtered_df['name'].str.contains(filter_name, case=False, na=False)]
-        if filter_email:
-            filtered_df = filtered_df[filtered_df['email'].str.contains(filter_email, case=False, na=False)]
-        if filter_company:
-            filtered_df = filtered_df[filtered_df['organization'].str.contains(filter_company, case=False, na=False)]
-        if filter_industry:
-            filtered_df = filtered_df[filtered_df['company_industry'].str.contains(filter_industry, case=False, na=False)]
-        st.write(f"Showing {len(filtered_df)} results after filtering.")
-        st.write("### Delete Records")
-        delete_indices = st.multiselect(
-            "Select rows to delete (by index)",
-            options=filtered_df.index.tolist(),
-            format_func=lambda x: f"{filtered_df.loc[x, 'name']} ({filtered_df.loc[x, 'email']})"
-        )
-        if st.button("Delete Selected Records") and delete_indices:
-            from mongodb_client import delete_lead_by_id
-            deleted_count = 0
-            for idx in delete_indices:
-                lead_id = filtered_df.loc[idx, 'lead_id']
-                if delete_lead_by_id(lead_id):
-                    deleted_count += 1
-            st.success(f"Deleted {deleted_count} record(s) from the database.")
-            st.experimental_rerun()
-        for idx, row in filtered_df.iterrows():
-            with st.expander(f"{row['name']} - {row['organization']} ({row['email']})"):
-                st.write(f"**Title:** {row.get('title', '')}")
-                st.write(f"**Email Status:** {row.get('email_status', '')}")
-                st.write(f"**LinkedIn:** {row.get('linkedin_url', '')}")
-                st.write(f"**Company:** {row.get('organization', '')}")
-                st.write(f"**Industry:** {row.get('company_industry', '')}")
-                st.write(f"**Email:** {row.get('email', '')}")
-                subject = extract_email_field(row, 'subject')
-                body = extract_email_field(row, 'body')
-                st.write(f"**Generated Email Subject:** {subject}")
-                if subject or body:
-                    if st.button("Show Generated Email", key=f"show_email_{idx}"):
-                        st.write(f"**Subject:** {subject}")
-                        st.write(f"**Body:**\n{body}")
-    else:
-        st.info("No enriched leads and generated emails found in the database.")
 
 # --- Pipeline Information Expander ---
 with st.expander("Pipeline Information"):

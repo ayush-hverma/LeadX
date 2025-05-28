@@ -128,8 +128,10 @@ if __name__ == "__main__":
 
         # Save enriched data to MongoDB Atlas
         from mongodb_client import save_enriched_data
+        # You must provide the user_email here for user-specific saving
+        user_email = "test@example.com"  # Replace with actual user email in production
         data_dicts = df.to_dict('records')
-        inserted_ids = save_enriched_data(data_dicts)
+        inserted_ids = save_enriched_data(data_dicts, user_email)
         print(f"\nSaved {len(inserted_ids)} records to MongoDB Atlas.")
     else:
         print("No data to save.")

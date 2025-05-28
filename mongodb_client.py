@@ -14,34 +14,40 @@ collection = db['enriched_leads']  # Use your collection name
 generated_emails_collection = db['generated_emails']  # Use your collection name
 scheduled_emails_collection = db['scheduled_emails']  # New collection for scheduled emails
 
-def save_enriched_data(data):
+def save_enriched_data(data, user_email):
     """
-    Save a single enriched data dictionary or a list of dictionaries to MongoDB Atlas.
+    Save a single enriched data dictionary or a list of dictionaries to MongoDB Atlas, tagged with user_email.
     """
     if isinstance(data, list):
+        for d in data:
+            d['user_email'] = user_email
         result = collection.insert_many(data)
-        logging.info(f"[MongoDB] Saved {len(result.inserted_ids)} enriched records: {result.inserted_ids}")
-        print(f"[MongoDB] Saved {len(result.inserted_ids)} enriched records: {result.inserted_ids}")
+        logging.info(f"[MongoDB] Saved {len(result.inserted_ids)} enriched records for {user_email}: {result.inserted_ids}")
+        print(f"[MongoDB] Saved {len(result.inserted_ids)} enriched records for {user_email}: {result.inserted_ids}")
         return result.inserted_ids
     else:
+        data['user_email'] = user_email
         result = collection.insert_one(data)
-        logging.info(f"[MongoDB] Saved 1 enriched record: {result.inserted_id}")
-        print(f"[MongoDB] Saved 1 enriched record: {result.inserted_id}")
+        logging.info(f"[MongoDB] Saved 1 enriched record for {user_email}: {result.inserted_id}")
+        print(f"[MongoDB] Saved 1 enriched record for {user_email}: {result.inserted_id}")
         return result.inserted_id
 
-def save_generated_emails(emails):
+def save_generated_emails(emails, user_email):
     """
-    Save a single generated email dictionary or a list of dictionaries to MongoDB Atlas.
+    Save a single generated email dictionary or a list of dictionaries to MongoDB Atlas, tagged with user_email.
     """
     if isinstance(emails, list):
+        for e in emails:
+            e['user_email'] = user_email
         result = generated_emails_collection.insert_many(emails)
-        logging.info(f"[MongoDB] Saved {len(result.inserted_ids)} generated emails: {result.inserted_ids}")
-        print(f"[MongoDB] Saved {len(result.inserted_ids)} generated emails: {result.inserted_ids}")
+        logging.info(f"[MongoDB] Saved {len(result.inserted_ids)} generated emails for {user_email}: {result.inserted_ids}")
+        print(f"[MongoDB] Saved {len(result.inserted_ids)} generated emails for {user_email}: {result.inserted_ids}")
         return result.inserted_ids
     else:
+        emails['user_email'] = user_email
         result = generated_emails_collection.insert_one(emails)
-        logging.info(f"[MongoDB] Saved 1 generated email: {result.inserted_id}")
-        print(f"[MongoDB] Saved 1 generated email: {result.inserted_id}")
+        logging.info(f"[MongoDB] Saved 1 generated email for {user_email}: {result.inserted_id}")
+        print(f"[MongoDB] Saved 1 generated email for {user_email}: {result.inserted_id}")
         return result.inserted_id
 
 def lead_exists(lead_id=None, email=None):
@@ -130,3 +136,55 @@ def schedule_followup_emails(lead_email, sender_email, sender_name, initial_time
         scheduled_id = save_scheduled_email(email_data)
         scheduled_ids.append(scheduled_id)
     return scheduled_ids
+
+def fetch_enriched_leads(user_email):
+    """
+    Fetch enriched leads for the specific user.
+    """
+    try:
+        leads = list(collection.find({'user_email': user_email}))
+        import pandas as pd
+        return pd.DataFrame(leads) if leads else None
+    except Exception as e:
+        import streamlit as st
+        st.error(f"Error fetching enriched leads: {e}")
+        return None
+
+def fetch_generated_emails(user_email):
+    """
+    Fetch generated emails for the specific user.
+    """
+    try:
+        emails = list(generated_emails_collection.find({'user_email': user_email}))
+        import pandas as pd
+        return pd.DataFrame(emails) if emails else None
+    except Exception as e:
+        import streamlit as st
+        st.error(f"Error fetching generated emails: {e}")
+        return None
+
+def delete_all_enriched_leads(user_email):
+    """
+    Delete all enriched leads for the specific user from MongoDB.
+    Returns the number of documents deleted.
+    """
+    try:
+        result = collection.delete_many({'user_email': user_email})
+        logging.info(f"[MongoDB] Deleted {result.deleted_count} enriched leads for {user_email}.")
+        return result.deleted_count
+    except Exception as e:
+        print(f"Error deleting all enriched leads for {user_email}: {e}")
+        return 0
+
+def delete_all_generated_emails(user_email):
+    """
+    Delete all generated emails for the specific user from MongoDB.
+    Returns the number of documents deleted.
+    """
+    try:
+        result = generated_emails_collection.delete_many({'user_email': user_email})
+        logging.info(f"[MongoDB] Deleted {result.deleted_count} generated emails for {user_email}.")
+        return result.deleted_count
+    except Exception as e:
+        print(f"Error deleting all generated emails for {user_email}: {e}")
+        return 0
