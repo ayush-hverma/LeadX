@@ -180,8 +180,20 @@ def handle_outlook_callback(code):
         # Load code verifier from file
         code_verifier = load_code_verifier()
         if not code_verifier:
-            logger.error("Code verifier not found in file")
-            st.error("Authentication session expired. Please try signing in again.")
+            logger.error("Code verifier not found in file (likely due to expired or reused auth code, or multiple auth attempts in parallel). Please restart the sign-in flow.")
+            st.error("Your Outlook authentication session expired or was already used. Please sign in again from the beginning.")
+            # Defensive: remove any stale verifier and token files
+            import os
+            if os.path.exists('outlook_code_verifier.pkl'):
+                os.remove('outlook_code_verifier.pkl')
+            if os.path.exists('outlook_token.pkl'):
+                os.remove('outlook_token.pkl')
+            # Clear all relevant session state
+            for k in ["outlook_token", "outlook_user_info", "outlook_account", "outlook_email", "outlook_auth_complete"]:
+                if k in st.session_state:
+                    st.session_state[k] = None
+            st.session_state["force_sign_in"] = True
+            st.rerun()
             return None
 
         logger.info("Retrieved code verifier from file")
@@ -205,6 +217,10 @@ def handle_outlook_callback(code):
         response = requests.post(token_url, data=token_data)
         logger.info(f"Token response status: {response.status_code}")
         logger.info(f"Token response: {response.text}")
+
+        # Always remove the code verifier after token exchange attempt
+        if os.path.exists('outlook_code_verifier.pkl'):
+            os.remove('outlook_code_verifier.pkl')
 
         if response.status_code == 200:
             result = response.json()
@@ -238,8 +254,6 @@ def handle_outlook_callback(code):
                     "AADSTS54005" in error_json.get("error_description", "")
                 ):
                     # Remove cached files to force new auth flow
-                    if os.path.exists('outlook_code_verifier.pkl'):
-                        os.remove('outlook_code_verifier.pkl')
                     if os.path.exists('outlook_token.pkl'):
                         os.remove('outlook_token.pkl')
                     logger.info("Cleared cached Outlook auth files due to redeemed code error.")
@@ -259,12 +273,24 @@ def get_outlook_user_info(access_token):
     try:
         headers = {'Authorization': f'Bearer {access_token}'}
         response = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers)
-        
         logger.info(f"User info response status: {response.status_code}")
         logger.info(f"User info response: {response.text}")
 
         if response.status_code == 200:
             return response.json()
+        elif response.status_code == 401 and "Lifetime validation failed, the token is expired" in response.text:
+            logger.error("Outlook token expired. Removing token file and forcing re-authentication.")
+            if os.path.exists('outlook_token.pkl'):
+                os.remove('outlook_token.pkl')
+            st.session_state.outlook_token = None
+            st.session_state.outlook_user_info = None
+            st.session_state.outlook_account = None
+            st.session_state.outlook_email = None
+            st.session_state.outlook_auth_complete = False
+            st.session_state["force_sign_in"] = True
+            st.warning("Your Outlook session expired. Please sign in again.")
+            st.rerun()
+            return None
         else:
             logger.error(f"Failed to get user info. Status: {response.status_code}")
             return None

@@ -289,7 +289,7 @@ if st.session_state.get('show_user_panel', False):
         st.info("No generated emails found for your account.")
     if st.button("Back to Main App", key="back_to_main"):
         st.session_state['show_user_panel'] = False
-        st.experimental_rerun()
+        st.rerun()
     st.stop()
 
 # --- People Search Tab ---
@@ -527,6 +527,10 @@ elif selected_tab == "People Enrichment":
             with st.spinner("Enriching data, please wait..."):
                 enriched_df = get_people_data(lead_ids)
                 if not enriched_df.empty:
+                    # Save enriched data to MongoDB for the current user
+                    user_email = get_user_email() if is_authenticated() else get_outlook_email()
+                    from mongodb_client import save_enriched_data
+                    save_enriched_data(enriched_df.to_dict('records'), user_email)
                     st.session_state["enriched_data"] = enriched_df
                     st.session_state["enrichment_completed"] = True
                     st.success("Enrichment complete!")
@@ -555,14 +559,64 @@ elif selected_tab == "Mail Generation":
                 generated_emails = generate_email_for_multiple_leads(leads, json.dumps(product_details))
                 st.session_state["generated_emails"] = generated_emails
                 st.session_state["mail_generation_completed"] = True
+                # Save generated emails to MongoDB for the current user
+                user_email = get_user_email() if is_authenticated() else get_outlook_email()
+                from mongodb_client import save_generated_emails
+                save_generated_emails(generated_emails, user_email)
                 st.success("Email generation complete!")
-                df = pd.DataFrame(generated_emails)
-                st.dataframe(df, use_container_width=True)
-                csv = df.to_csv(index=False)
-                st.download_button("Download Generated Emails as CSV", csv, "generated_emails.csv", "text/csv")
-        elif st.session_state.get("generated_emails"):
+        if st.session_state.get("generated_emails"):
+            st.subheader("Generated Emails Preview")
+            email_cards_css = """
+            <style>
+            .compact-email-row {
+                background: #f5f6fa;
+                border-radius: 8px;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+                margin-bottom: 10px;
+                padding: 10px 16px;
+                font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
+                border: 1px solid #e3e6ee;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .compact-email-label {
+                font-weight: 600;
+                color: #555;
+                min-width: 60px;
+                display: inline-block;
+            }
+            .compact-email-value {
+                color: #222;
+                font-weight: 400;
+                margin-right: 18px;
+            }
+            .compact-email-btn {
+                background: #1976d2;
+                color: #fff;
+                border: none;
+                border-radius: 5px;
+                padding: 5px 16px;
+                font-size: 14px;
+                cursor: pointer;
+                transition: background 0.2s;
+            }
+            .compact-email-btn:hover {
+                background: #1251a3;
+            }
+            </style>
+            """
+            st.markdown(email_cards_css, unsafe_allow_html=True)
+            for idx, email in enumerate(st.session_state["generated_emails"]):
+                to_email = email.get('recipient_email') or email.get('email', 'N/A')
+                subject = email.get('subject') or email.get('final_result', {}).get('subject', '')
+                body = email.get('body') or email.get('final_result', {}).get('body', '')
+                with st.expander(f"To: {to_email} | Subject: {subject}", expanded=False):
+                    st.markdown(f"<div class='compact-email-label'>To:</div> <span class='compact-email-value'>{to_email}</span>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='compact-email-label'>Subject:</div> <span class='compact-email-value'>{subject}</span>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='margin-top:10px;'><b>Body:</b></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='background:#f0f1f5; border-radius:6px; padding:12px 14px; font-family:Menlo,Consolas,monospace,monospace; color:#222; font-size:15px; white-space:pre-wrap; word-break:break-word;'>{body}</div>", unsafe_allow_html=True)
             df = pd.DataFrame(st.session_state["generated_emails"])
-            st.dataframe(df, use_container_width=True)
             csv = df.to_csv(index=False)
             st.download_button("Download Generated Emails as CSV", csv, "generated_emails.csv", "text/csv")
     else:
@@ -573,6 +627,16 @@ elif selected_tab == "Send Emails":
     st.write("Send your generated emails in batches or schedule follow-ups.")
     if st.session_state.get("generated_emails"):
         enriched_data = st.session_state.get("enriched_data")
+        if enriched_data is None or enriched_data.empty:
+            # Try to fetch from MongoDB as fallback
+            from mongodb_client import fetch_enriched_leads
+            user_email = get_user_email() if is_authenticated() else get_outlook_email()
+            enriched_data = fetch_enriched_leads(user_email)
+            if enriched_data is not None and not enriched_data.empty:
+                st.session_state["enriched_data"] = enriched_data
+                st.info("Enriched data loaded from database.")
+            else:
+                st.warning("No enriched data found. Please complete enrichment before sending emails.")
         payloads = prepare_email_payloads(st.session_state["generated_emails"], enriched_data)
         if st.button("Send Emails Now", key="send_emails_btn"):
             with st.spinner("Sending emails, please wait..."):

@@ -70,6 +70,7 @@ class OutlookSender:
         total = len(email_payloads)
         successful = 0
         failed = 0
+        batch_results = []
 
         try:
             # Process each email
@@ -79,16 +80,22 @@ class OutlookSender:
                     message = self.create_message(payload)
                     if not message:
                         logger.error(f"Failed to create message for {payload['email']}")
+                        print(f"❌ Failed to create message for {payload['email']}")
+                        batch_results.append({'recipient': payload['email'][0], 'status': 'failed', 'error': 'Failed to create message'})
                         continue
-                        
                     if message.send():
                         successful += 1
                         logger.info(f"Successfully sent email to {payload['email']}")
+                        print(f"✅ Successfully sent email to {payload['email'][0]}")
+                        batch_results.append({'recipient': payload['email'][0], 'status': 'success'})
                     else:
                         logger.error(f"Failed to send email to {payload['email']}")
+                        print(f"❌ Failed to send email to {payload['email'][0]}")
+                        batch_results.append({'recipient': payload['email'][0], 'status': 'failed', 'error': 'Unknown send failure'})
                 except Exception as e:
                     failed += 1
                     logger.error(f"Error sending email to {payload['email']}: {str(e)}")
+                    print(f"❌ Failed to send email to {payload['email'][0]}: {str(e)}")
                     # If token refresh error, try to refresh and retry once
                     if "No auth token found" in str(e) or "refresh_token" in str(e):
                         try:
@@ -99,26 +106,37 @@ class OutlookSender:
                                 successful += 1
                                 failed -= 1
                                 logger.info(f"Successfully sent email to {payload['email']} after token refresh")
+                                print(f"✅ Successfully sent email to {payload['email'][0]} after token refresh")
+                                batch_results.append({'recipient': payload['email'][0], 'status': 'success'})
                             else:
                                 logger.error(f"Failed to send email to {payload['email']} after token refresh")
+                                print(f"❌ Failed to send email to {payload['email'][0]} after token refresh")
+                                batch_results.append({'recipient': payload['email'][0], 'status': 'failed', 'error': 'Send failed after token refresh'})
                         except Exception as retry_error:
                             logger.error(f"Error retrying email to {payload['email']}: {str(retry_error)}")
+                            print(f"❌ Error retrying email to {payload['email'][0]}: {str(retry_error)}")
+                            batch_results.append({'recipient': payload['email'][0], 'status': 'failed', 'error': str(retry_error)})
+                    else:
+                        batch_results.append({'recipient': payload['email'][0], 'status': 'failed', 'error': str(e)})
 
             return {
                 'success': successful > 0,
                 'message': f'Email sending completed. Total: {total}, Successful: {successful}, Failed: {failed}',
                 'total': total,
                 'successful': successful,
-                'failed': failed
+                'failed': failed,
+                'results': batch_results
             }
         except Exception as e:
             logger.error(f"Error in send_email_batch: {str(e)}")
+            print(f"❌ Error in send_email_batch: {str(e)}")
             return {
                 'success': False,
                 'message': f'Error sending emails: {str(e)}',
                 'total': total,
                 'successful': successful,
-                'failed': failed
+                'failed': failed,
+                'results': batch_results
             }
 
     async def send_emails(self, email_payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -142,12 +160,22 @@ class OutlookSender:
         # Process batches
         total_successful = 0
         total_failed = 0
-        
+        all_results = []
         for batch_num, batch in enumerate(batches, 1):
             logger.info(f"Processing batch {batch_num} of {len(batches)}")
             result = self.send_email_batch(batch)
             total_successful += result['successful']
             total_failed += result['failed']
+            all_results.extend(result.get('results', []))
+        
+        # Print per-email summary after all batches
+        print("\n--- Per-email send results (Outlook) ---")
+        for res in all_results:
+            if res.get('status') == 'success':
+                print(f"✅ Email sent to {res.get('recipient')}")
+            else:
+                print(f"❌ Failed to send email to {res.get('recipient')}: {res.get('error')}")
+        print("--- End of Outlook send results ---\n")
         
         # Return summary
         return {

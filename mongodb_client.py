@@ -18,37 +18,47 @@ def save_enriched_data(data, user_email):
     """
     Save a single enriched data dictionary or a list of dictionaries to MongoDB Atlas, tagged with user_email.
     """
-    if isinstance(data, list):
-        for d in data:
-            d['user_email'] = user_email
-        result = collection.insert_many(data)
-        logging.info(f"[MongoDB] Saved {len(result.inserted_ids)} enriched records for {user_email}: {result.inserted_ids}")
-        print(f"[MongoDB] Saved {len(result.inserted_ids)} enriched records for {user_email}: {result.inserted_ids}")
-        return result.inserted_ids
-    else:
-        data['user_email'] = user_email
-        result = collection.insert_one(data)
-        logging.info(f"[MongoDB] Saved 1 enriched record for {user_email}: {result.inserted_id}")
-        print(f"[MongoDB] Saved 1 enriched record for {user_email}: {result.inserted_id}")
-        return result.inserted_id
+    try:
+        if isinstance(data, list):
+            for d in data:
+                d['user_email'] = user_email
+            result = collection.insert_many(data)
+            logging.info(f"[MongoDB] Saved {len(result.inserted_ids)} enriched records for {user_email}: {result.inserted_ids}")
+            print(f"[MongoDB] Saved {len(result.inserted_ids)} enriched records for {user_email}: {result.inserted_ids}")
+            return result.inserted_ids
+        else:
+            data['user_email'] = user_email
+            result = collection.insert_one(data)
+            logging.info(f"[MongoDB] Saved 1 enriched record for {user_email}: {result.inserted_id}")
+            print(f"[MongoDB] Saved 1 enriched record for {user_email}: {result.inserted_id}")
+            return result.inserted_id
+    except Exception as e:
+        logging.error(f"[MongoDB] Failed to save enriched data for {user_email}: {e}")
+        print(f"[MongoDB] Failed to save enriched data for {user_email}: {e}")
+        return None
 
 def save_generated_emails(emails, user_email):
     """
     Save a single generated email dictionary or a list of dictionaries to MongoDB Atlas, tagged with user_email.
     """
-    if isinstance(emails, list):
-        for e in emails:
-            e['user_email'] = user_email
-        result = generated_emails_collection.insert_many(emails)
-        logging.info(f"[MongoDB] Saved {len(result.inserted_ids)} generated emails for {user_email}: {result.inserted_ids}")
-        print(f"[MongoDB] Saved {len(result.inserted_ids)} generated emails for {user_email}: {result.inserted_ids}")
-        return result.inserted_ids
-    else:
-        emails['user_email'] = user_email
-        result = generated_emails_collection.insert_one(emails)
-        logging.info(f"[MongoDB] Saved 1 generated email for {user_email}: {result.inserted_id}")
-        print(f"[MongoDB] Saved 1 generated email for {user_email}: {result.inserted_id}")
-        return result.inserted_id
+    try:
+        if isinstance(emails, list):
+            for e in emails:
+                e['user_email'] = user_email
+            result = generated_emails_collection.insert_many(emails)
+            logging.info(f"[MongoDB] Saved {len(result.inserted_ids)} generated emails for {user_email}: {result.inserted_ids}")
+            print(f"[MongoDB] Saved {len(result.inserted_ids)} generated emails for {user_email}: {result.inserted_ids}")
+            return result.inserted_ids
+        else:
+            emails['user_email'] = user_email
+            result = generated_emails_collection.insert_one(emails)
+            logging.info(f"[MongoDB] Saved 1 generated email for {user_email}: {result.inserted_id}")
+            print(f"[MongoDB] Saved 1 generated email for {user_email}: {result.inserted_id}")
+            return result.inserted_id
+    except Exception as e:
+        logging.error(f"[MongoDB] Failed to save generated emails for {user_email}: {e}")
+        print(f"[MongoDB] Failed to save generated emails for {user_email}: {e}")
+        return None
 
 def lead_exists(lead_id=None, email=None):
     """

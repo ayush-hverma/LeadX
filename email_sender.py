@@ -10,11 +10,6 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from auth import get_gmail_service, get_user_email, get_user_name, is_authenticated
 from outlook_auth import is_outlook_authenticated, get_outlook_email, get_outlook_name
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 class EmailSender:
     def __init__(self, batch_size: int = 5):
@@ -46,7 +41,6 @@ class EmailSender:
             raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode('utf-8')
             return {'raw': raw_message}
         except Exception as e:
-            logger.error(f"Error creating message for {to}: {str(e)}")
             raise
 
     async def send_email_batch(self, batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -55,7 +49,6 @@ class EmailSender:
         gmail_service = get_gmail_service()
         
         if not gmail_service:
-            logger.error("Gmail service not initialized")
             return [{"error": "Gmail service not initialized. Please sign in again.", "status_code": 500}]
         
         for email_data in batch:
@@ -78,7 +71,7 @@ class EmailSender:
                     body=message
                 ).execute()
                 
-                logger.info(f"Successfully sent email to {email_data['email'][0]}")
+                print(f"✅ Successfully sent email to {email_data['email'][0]}")
                 results.append({
                     "status": "success",
                     "message_id": sent_message['id'],
@@ -86,7 +79,7 @@ class EmailSender:
                 })
             except Exception as e:
                 error_msg = str(e)
-                logger.error(f"Error sending email to {email_data.get('email', ['unknown'])[0]}: {error_msg}")
+                print(f"❌ Failed to send email to {email_data.get('email', ['unknown'])[0]}: {error_msg}")
                 results.append({
                     "error": error_msg,
                     "status_code": 500,
@@ -100,7 +93,6 @@ class EmailSender:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         if not email_payloads:
-            logger.error("No email payloads provided")
             return {
                 "timestamp": timestamp,
                 "total_emails": 0,
@@ -116,16 +108,21 @@ class EmailSender:
         # Process batches
         all_results = []
         for batch_num, batch in enumerate(batches, 1):
-            logger.info(f"Processing batch {batch_num} of {len(batches)}")
             results = await self.send_email_batch(batch)
             all_results.extend(results)
+        
+        # Print per-email summary after all batches
+        print("\n--- Per-email send results (Gmail) ---")
+        for res in all_results:
+            if res.get("status") == "success":
+                print(f"✅ Email sent to {res.get('recipient')} (Message ID: {res.get('message_id', '-')})")
+            else:
+                print(f"❌ Failed to send email to {res.get('recipient')}: {res.get('error')}")
+        print("--- End of Gmail send results ---\n")
         
         # Calculate summary
         successful = len([r for r in all_results if r.get("status") == "success"])
         failed = len([r for r in all_results if r.get("error")])
-        
-        # Log summary
-        logger.info(f"Email sending completed. Total: {len(email_payloads)}, Successful: {successful}, Failed: {failed}")
         
         # Return detailed summary
         return {
@@ -138,92 +135,59 @@ class EmailSender:
 
 def prepare_email_payloads(generated_emails: List[Dict[str, Any]], enriched_data: pd.DataFrame = None) -> List[Dict[str, Any]]:
     """Convert generated emails into the format required by the API."""
+    print(f"[DEBUG] prepare_email_payloads: received {len(generated_emails) if generated_emails else 0} generated_emails.")
+    if enriched_data is None or enriched_data.empty:
+        print("[DEBUG] prepare_email_payloads: enriched_data is None or empty! No payloads will be created.")
+        return []
     payloads = []
-    
-    logger.info(f"Starting to prepare email payloads. Generated emails count: {len(generated_emails)}")
-    logger.info(f"Enriched data available: {enriched_data is not None}")
     
     # Check authentication for either Gmail or Outlook
     gmail_auth = is_authenticated()
     outlook_auth = is_outlook_authenticated()
-    logger.info(f"Gmail auth status: {gmail_auth}")
-    logger.info(f"Outlook auth status: {outlook_auth}")
     
     if not (gmail_auth or outlook_auth):
-        logger.error("Not authenticated with either Gmail or Outlook")
         return payloads
         
     # Get sender information based on authentication method
     if outlook_auth:
         sender_email = get_outlook_email()
         sender_name = get_outlook_name()
-        logger.info("Using Outlook credentials")
     else:
         sender_email = get_user_email()
         sender_name = get_user_name()
-        logger.info("Using Gmail credentials")
-    
-    logger.info(f"Sender email: {sender_email}")
-    logger.info(f"Sender name: {sender_name}")
     
     if not sender_email:
-        logger.error("No sender email found")
         return payloads
     
     if not generated_emails:
-        logger.error("No generated emails provided")
         return payloads
         
-    if enriched_data is None:
-        logger.error("No enriched data provided")
-        return payloads
-    
-    # Log the structure of the first generated email for debugging
-    if generated_emails:
-        logger.info(f"First generated email structure: {json.dumps(generated_emails[0], indent=2)}")
-        logger.info(f"Enriched data columns: {enriched_data.columns.tolist()}")
-        logger.info(f"Sample lead_id from enriched data: {enriched_data['lead_id'].iloc[0] if 'lead_id' in enriched_data.columns else 'No lead_id column'}")
-    
     for result in generated_emails:
         try:
-            # Check if the result has the required fields
             if not isinstance(result, dict):
-                logger.warning(f"Skipping invalid result type: {type(result)}")
+                print("[DEBUG] Skipping: generated_email is not a dict.")
                 continue
-                
-            # Get the final result from the correct structure
             final_result = result.get("final_result", {})
             if not final_result:
-                logger.warning(f"No final_result found in email data: {result}")
+                print(f"[DEBUG] Skipping: no final_result in {result}")
                 continue
-                
-            # Get lead_id and find email from enriched data
             lead_id = result.get("lead_id")
             if not lead_id:
-                logger.warning(f"No lead_id found in email data: {result}")
+                print(f"[DEBUG] Skipping: no lead_id in {result}")
                 continue
-                
-            # Get email from enriched data
             lead_data = enriched_data[enriched_data['lead_id'] == lead_id]
             if lead_data.empty:
-                logger.warning(f"No matching lead data found for lead_id: {lead_id}")
+                print(f"[DEBUG] Skipping: no matching enriched_data for lead_id {lead_id}")
                 continue
-                
             email = lead_data['email'].iloc[0]
             subject = final_result.get("subject", "")
             body = final_result.get("body", "")
-            
-            # Skip if any required field is missing
             if not all([email, subject, body]):
-                logger.warning(f"Missing required fields for lead_id {lead_id}. Email: {bool(email)}, Subject: {bool(subject)}, Body: {bool(body)}")
+                print(f"[DEBUG] Skipping: missing email/subject/body for lead_id {lead_id}")
                 continue
-                
-            # Skip if email is 'N/A'
             if email == 'N/A':
-                logger.warning(f"Invalid email 'N/A' for lead_id {lead_id}")
+                print(f"[DEBUG] Skipping: email is 'N/A' for lead_id {lead_id}")
                 continue
-            
-            logger.info(f"Preparing payload for lead_id {lead_id} with email {email}")
             
             # Format the email body with proper closing
             if sender_name:
@@ -244,10 +208,9 @@ def prepare_email_payloads(generated_emails: List[Dict[str, Any]], enriched_data
                 "sender_email": sender_email,
                 "sender_name": sender_name
             })
-            logger.info(f"Successfully added payload for lead_id {lead_id}")
+            print(f"[DEBUG] Prepared payload for {email} (lead_id: {lead_id})")
         except Exception as e:
-            logger.error(f"Error processing lead_id {lead_id}: {str(e)}")
+            print(f"[DEBUG] Exception while preparing payload: {e}")
             continue
-    
-    logger.info(f"Successfully prepared {len(payloads)} email payloads")
-    return payloads 
+    print(f"[DEBUG] prepare_email_payloads: returning {len(payloads)} payloads.")
+    return payloads
