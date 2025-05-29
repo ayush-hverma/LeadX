@@ -156,6 +156,7 @@ def handle_auth_callback(code):
         }
 
         flow = Flow.from_client_config(client_config, scopes=SCOPES, redirect_uri=REDIRECT_URI)
+        print("code:", code)  # Debugging line to check the code value
         try:
             flow.fetch_token(code=code)
         except Exception as fetch_exc:

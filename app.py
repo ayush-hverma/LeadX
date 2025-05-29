@@ -183,10 +183,20 @@ def handle_auth_flow():
         st.stop()
 
 # Check if user is authenticated with either Google or Outlook
-if not (is_authenticated() or is_outlook_authenticated()) or st.session_state.get("force_sign_in", False):
-    st.session_state["force_sign_in"] = False
-    handle_auth_flow()
-    st.stop()
+# Only check authentication once per rerun, and cache result in session state
+if 'auth_checked' not in st.session_state or not st.session_state['auth_checked']:
+    from outlook_auth import load_outlook_token
+    from auth import load_google_token
+    outlook_token = load_outlook_token()
+    google_token = load_google_token()
+    outlook_ok = is_outlook_authenticated() and outlook_token is not None and 'access_token' in outlook_token
+    google_ok = is_authenticated() and google_token is not None
+    if not (google_ok or outlook_ok) or st.session_state.get("force_sign_in", False):
+        st.session_state["force_sign_in"] = False
+        handle_auth_flow()
+        st.session_state['auth_checked'] = True
+        st.stop()
+    st.session_state['auth_checked'] = True
 
 # User is authenticated, show the main app
 st.title("LeadX- Discover, Enrich, Engage")
@@ -218,6 +228,7 @@ with st.sidebar:
                 os.remove('token.pickle')
             if os.path.exists('google_token.pkl'):
                 os.remove('google_token.pkl')
+            st.session_state['auth_checked'] = False
             st.rerun()
     elif is_outlook_authenticated():
         from outlook_auth import get_outlook_name, outlook_logout
@@ -231,6 +242,7 @@ with st.sidebar:
             import os
             if os.path.exists('outlook_token.pkl'):
                 os.remove('outlook_token.pkl')
+            st.session_state['auth_checked'] = False
             st.rerun()
 
 # Initialize session state for storing search results and enrichment data
@@ -560,76 +572,70 @@ elif selected_tab == "People Enrichment":
 
 elif selected_tab == "Mail Generation":
     st.title("Mail Generation")
-    st.write("Generate personalized emails for your enriched leads.")
+    st.write("Generate personalized emails for your enriched leads, including follow-ups.")
     if st.session_state.get("enriched_data") is not None and not st.session_state["enriched_data"].empty:
         product = st.selectbox("Select Product", PRODUCTS)
+        # Select follow-up intervals
+        intervals = st.multiselect(
+            "Select follow-up intervals (days after initial email)",
+            options=[0, 3, 8, 17, 24, 30],
+            default=[0, 3, 8, 17]
+        )
         if st.button("Generate Emails", key="generate_emails_btn"):
             with st.spinner("Generating emails, please wait..."):
+                from personalised_email import FOLLOWUP_PROMPTS, generate_email_for_single_lead_with_custom_prompt
                 product_details = get_product_details(product.lower())
                 leads = st.session_state["enriched_data"].to_dict(orient="records")
-                generated_emails = generate_email_for_multiple_leads(leads, json.dumps(product_details))
-                st.session_state["generated_emails"] = generated_emails
+                all_generated_emails = []
+                for lead in leads:
+                    lead_emails = []
+                    for day in sorted(intervals):
+                        prompt = FOLLOWUP_PROMPTS[day]
+                        email = generate_email_for_single_lead_with_custom_prompt(
+                            lead_details=lead,
+                            product_details=json.dumps(product_details),
+                            custom_prompt=prompt,
+                            product_name=product
+                        )
+                        email["interval_day"] = day
+                        lead_emails.append(email)
+                    all_generated_emails.append({
+                        "lead_id": lead.get("id") or lead.get("lead_id"),
+                        "lead_name": lead.get("name"),
+                        "emails": lead_emails
+                    })
+                st.session_state["generated_emails"] = all_generated_emails
                 st.session_state["mail_generation_completed"] = True
                 # Save generated emails to MongoDB for the current user
                 user_email = get_user_email() if is_authenticated() else get_outlook_email()
                 from mongodb_client import save_generated_emails
-                save_generated_emails(generated_emails, user_email)
+                save_generated_emails(all_generated_emails, user_email)
                 st.success("Email generation complete!")
         if st.session_state.get("generated_emails"):
-            st.subheader("Generated Emails Preview")
+            st.subheader("Generated Emails & Follow-ups Preview")
             email_cards_css = """
             <style>
-            .compact-email-row {
-                background: #f5f6fa;
-                border-radius: 8px;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.04);
-                margin-bottom: 10px;
-                padding: 10px 16px;
-                font-family: 'Segoe UI', 'Roboto', Arial, sans-serif;
-                border: 1px solid #e3e6ee;
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-            }
-            .compact-email-label {
-                font-weight: 600;
-                color: #555;
-                min-width: 60px;
-                display: inline-block;
-            }
-            .compact-email-value {
-                color: #222;
-                font-weight: 400;
-                margin-right: 18px;
-            }
-            .compact-email-btn {
-                background: #1976d2;
-                color: #fff;
-                border: none;
-                border-radius: 5px;
-                padding: 5px 16px;
-                font-size: 14px;
-                cursor: pointer;
-                transition: background 0.2s;
-            }
-            .compact-email-btn:hover {
-                background: #1251a3;
-            }
+            .followup-lead-block { background: #f8fafd; border-radius: 10px; margin-bottom: 18px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.03); }
+            .followup-lead-title { font-size: 18px; font-weight: 600; color: #1a237e; margin-bottom: 8px; }
+            .followup-tab { margin-bottom: 10px; }
+            .followup-email-body { background: #f0f1f5; border-radius: 6px; padding: 12px 14px; font-family: Menlo,Consolas,monospace,monospace; color: #222; font-size: 15px; white-space: pre-wrap; word-break: break-word; }
+            .followup-email-meta { color: #555; font-size: 14px; margin-bottom: 4px; }
             </style>
             """
             st.markdown(email_cards_css, unsafe_allow_html=True)
-            for idx, email in enumerate(st.session_state["generated_emails"]):
-                to_email = email.get('recipient_email') or email.get('email', 'N/A')
-                subject = email.get('subject') or email.get('final_result', {}).get('subject', '')
-                body = email.get('body') or email.get('final_result', {}).get('body', '')
-                with st.expander(f"To: {to_email} | Subject: {subject}", expanded=False):
-                    st.markdown(f"<div class='compact-email-label'>To:</div> <span class='compact-email-value'>{to_email}</span>", unsafe_allow_html=True)
-                    st.markdown(f"<div class='compact-email-label'>Subject:</div> <span class='compact-email-value'>{subject}</span>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='margin-top:10px;'><b>Body:</b></div>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='background:#f0f1f5; border-radius:6px; padding:12px 14px; font-family:Menlo,Consolas,monospace,monospace; color:#222; font-size:15px; white-space:pre-wrap; word-break:break-word;'>{body}</div>", unsafe_allow_html=True)
-            df = pd.DataFrame(st.session_state["generated_emails"])
-            csv = df.to_csv(index=False)
-            st.download_button("Download Generated Emails as CSV", csv, "generated_emails.csv", "text/csv")
+            for lead_block in st.session_state["generated_emails"]:
+                st.markdown(f"<div class='followup-lead-block'>", unsafe_allow_html=True)
+                st.markdown(f"<div class='followup-lead-title'>{lead_block['lead_name']}</div>", unsafe_allow_html=True)
+                tabs = st.tabs([f"Day {email['interval_day']}" for email in lead_block["emails"]])
+                for idx, email in enumerate(lead_block["emails"]):
+                    with tabs[idx]:
+                        st.markdown(f"<div class='followup-email-meta'><b>To:</b> {email.get('recipient_email','')}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='followup-email-meta'><b>Subject:</b> {email.get('subject','')}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='margin-top:10px;'><b>Body:</b></div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='followup-email-body'>{email.get('body','')}</div>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+            # Optionally, allow download as CSV/JSON
+            # ...existing code for download if needed...
     else:
         st.info("Please complete People Enrichment first.")
 
@@ -707,26 +713,41 @@ def generate_email():
         leads = data.get('leads', [])
         product = data.get('product', '')
         
+        logging.info(f"Received email generation request for {len(leads)} leads and product: {product}")
+        
         if not leads or not product:
+            logging.error("Missing required fields in request")
             return jsonify({'error': 'Missing required fields'}), 400
         
         # Get product details from the database
         product_details = product_database.get(product.lower())
         if not product_details:
+            logging.error(f"Invalid product requested: {product}")
             return jsonify({'error': 'Invalid product'}), 400
         
         # Convert product details to string format
         product_details_str = json.dumps(product_details)
         
         # Generate emails for all leads
+        logging.info("Starting email generation process")
         generated_emails = generate_email_for_multiple_leads(leads, product_details_str)
         
+        # Log success/failure statistics
+        success_count = sum(1 for email in generated_emails if email.get('subject') != '[No subject generated]' and email.get('body') != '[No body generated]')
+        failure_count = len(generated_emails) - success_count
+        logging.info(f"Email generation completed. Success: {success_count}, Failed: {failure_count}, Total: {len(generated_emails)}")
+        
         return jsonify({
-            'emails': generated_emails
+            'emails': generated_emails,
+            'stats': {
+                'total': len(generated_emails),
+                'successful': success_count,
+                'failed': failure_count
+            }
         })
         
     except Exception as e:
-        print(f"Error generating email: {str(e)}")
+        logging.error(f"Error in generate-email endpoint: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 
@@ -740,9 +761,17 @@ def main():
         code = st.query_params['code']
         # Check if this is an Outlook auth callback (state param)
         if 'state' in st.query_params and str(st.query_params['state']).startswith('outlook_auth'):
+            from outlook_auth import handle_outlook_callback, load_code_verifier, load_outlook_token
+            state = st.query_params['state']
+            code_verifier = load_code_verifier(state)
+            outlook_token = load_outlook_token()
+            if not code_verifier:
+                st.error("Outlook authentication failed: code verifier missing or expired. Please try signing in again.")
+                st.query_params.clear()
+                st.stop()
+            if not outlook_token:
+                st.warning("No Outlook token found. You may need to sign in again after authentication.")
             user_info = handle_outlook_callback(code)
-            # handle_outlook_callback already saves the token to file
-            # and returns user_info if successful
             if user_info:
                 st.query_params.clear()
                 st.success("Outlook authentication successful!")
@@ -752,8 +781,14 @@ def main():
                 st.stop()
         else:
             # Assume Google auth
-            from auth import handle_auth_callback
+            from auth import handle_auth_callback, load_google_token
             user_info = handle_auth_callback(code)
+            # Always fetch the Google token file after callback
+            credentials = load_google_token()
+            if not credentials:
+                st.error("Google authentication failed: token file missing or expired. Please try signing in again.")
+                st.query_params.clear()
+                st.stop()
             if user_info:
                 st.session_state.user_info = user_info
                 st.query_params.clear()
@@ -762,42 +797,6 @@ def main():
             else:
                 st.error("Failed to authenticate with Google. Please try again.")
                 st.stop()
-
-    # Show user info for Google or Outlook in the sidebar only, without duplicates
-    with st.sidebar:
-        if is_authenticated() and st.session_state.user_info:
-            name = st.session_state.user_info.get('name', 'User')
-            email = st.session_state.user_info.get('email', '')
-            st.write(f"Signed in as: {name if name else 'Google User'}")
-            st.write(f"Email: {email}")
-            if st.button("My account", key="user_panel_btn_google"):
-                st.session_state['show_user_panel'] = True
-            if st.button("Logout", key="sidebar_logout_btn_google"):
-                st.session_state.user_info = None
-                if 'credentials' in st.session_state:
-                    st.session_state.credentials = None
-                if 'gmail_service' in st.session_state:
-                    st.session_state.gmail_service = None
-                import os
-                if os.path.exists('token.pickle'):
-                    os.remove('token.pickle')
-                if os.path.exists('google_token.pkl'):
-                    os.remove('google_token.pkl')
-                st.rerun()
-        elif is_outlook_authenticated():
-            from outlook_auth import get_outlook_name, get_outlook_email, outlook_logout
-            name = get_outlook_name()
-            email = get_outlook_email()
-            st.write(f"Signed in as: {name if name else 'Outlook User'}")
-            st.write(f"Email: {email if email else ''}")
-            if st.button("My account", key="user_panel_btn_outlook"):
-                st.session_state['show_user_panel'] = True
-            if st.button("Logout", key="sidebar_logout_btn_outlook"):
-                outlook_logout()
-                import os
-                if os.path.exists('outlook_token.pkl'):
-                    os.remove('outlook_token.pkl')
-                st.rerun()
 
 if __name__ == "__main__":
     main()
