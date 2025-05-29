@@ -127,14 +127,12 @@ def handle_auth_flow():
     query_params = st.query_params
     if 'code' in query_params:
         code = query_params['code']
-        logger.info(f"Received auth code: {code}")
-        
-        # Check if this is an Outlook auth callback
-        if 'state' in query_params and query_params['state'] == 'outlook_auth':
+        #logger.info(f"Received auth code: {code}")
+        # Check if this is an Outlook auth callback (state startswith outlook_auth)
+        if 'state' in query_params and str(query_params['state']).startswith('outlook_auth'):
             user_info = handle_outlook_callback(code)
         else:
             user_info = handle_auth_callback(code)
-            
         if user_info:
             # Clear query parameters and rerun
             st.query_params.clear()
@@ -206,23 +204,33 @@ with st.sidebar:
     if is_authenticated():
         name = get_user_name()
         st.write(f"Signed in as: {name if name else 'Google User'}")
+        st.write(f"Email: {get_user_email()}")
         if st.button("My account", key="user_panel_btn_google"):
             st.session_state['show_user_panel'] = True
-        if st.button("Logout", key="sidebar_logout_btn"):
-            logout()
-            st.query_params.clear()
-            st.session_state["force_sign_in"] = True
+        if st.button("Logout", key="sidebar_logout_btn_google"):
+            st.session_state.user_info = None
+            if 'credentials' in st.session_state:
+                st.session_state.credentials = None
+            if 'gmail_service' in st.session_state:
+                st.session_state.gmail_service = None
+            import os
+            if os.path.exists('token.pickle'):
+                os.remove('token.pickle')
+            if os.path.exists('google_token.pkl'):
+                os.remove('google_token.pkl')
             st.rerun()
     elif is_outlook_authenticated():
         from outlook_auth import get_outlook_name, outlook_logout
         name = get_outlook_name()
         st.write(f"Signed in as: {name if name else 'Outlook User'}")
+        st.write(f"Email: {get_outlook_email()}")
         if st.button("My account", key="user_panel_btn_outlook"):
             st.session_state['show_user_panel'] = True
-        if st.button("Logout", key="sidebar_logout_btn"):
+        if st.button("Logout", key="sidebar_logout_btn_outlook"):
             outlook_logout()
-            st.query_params.clear()
-            st.session_state["force_sign_in"] = True
+            import os
+            if os.path.exists('outlook_token.pkl'):
+                os.remove('outlook_token.pkl')
             st.rerun()
 
 # Initialize session state for storing search results and enrichment data
@@ -289,6 +297,9 @@ if st.session_state.get('show_user_panel', False):
         st.info("No generated emails found for your account.")
     if st.button("Back to Main App", key="back_to_main"):
         st.session_state['show_user_panel'] = False
+        # Check if Outlook session is still valid after returning
+        if is_outlook_authenticated() is False and get_outlook_email() is None:
+            st.session_state["force_sign_in"] = True
         st.rerun()
     st.stop()
 
@@ -728,7 +739,7 @@ def main():
     if 'code' in st.query_params:
         code = st.query_params['code']
         # Check if this is an Outlook auth callback (state param)
-        if 'state' in st.query_params and st.query_params['state'] == 'outlook_auth':
+        if 'state' in st.query_params and str(st.query_params['state']).startswith('outlook_auth'):
             user_info = handle_outlook_callback(code)
             # handle_outlook_callback already saves the token to file
             # and returns user_info if successful
@@ -752,37 +763,41 @@ def main():
                 st.error("Failed to authenticate with Google. Please try again.")
                 st.stop()
 
-    # Show user info for Google or Outlook
-    # For Google: use session_state.user_info
-    # For Outlook: use get_outlook_name/get_outlook_email (file-based)
-    if is_authenticated() and st.session_state.user_info:
-        st.write("Welcome,", st.session_state.user_info.get('name', 'User'))
-        st.write("Email:", st.session_state.user_info.get('email', ''))
-        if st.button("Logout"):
-            st.session_state.user_info = None
-            st.rerun()
-    elif is_outlook_authenticated():
-        from outlook_auth import get_outlook_name, get_outlook_email
-        name = get_outlook_name()
-        email = get_outlook_email()
-        # Removed duplicate 'Signed in as' lines at the bottom of the dashboard
-        # Only show Outlook info if authenticated with Outlook
-        if is_outlook_authenticated():
-            # Clean up any Google session state and token file BEFORE fetching Outlook email
-            for k in ["user_info", "credentials", "gmail_service"]:
-                if k in st.session_state:
-                    st.session_state[k] = None
-            import os
-            if os.path.exists('token.pickle'):
-                os.remove('token.pickle')
-            if os.path.exists('google_token.pkl'):
-                os.remove('google_token.pkl')
-            user_email = None
-            from outlook_auth import get_outlook_email
-            if hasattr(st.session_state, 'user_info'):
+    # Show user info for Google or Outlook in the sidebar only, without duplicates
+    with st.sidebar:
+        if is_authenticated() and st.session_state.user_info:
+            name = st.session_state.user_info.get('name', 'User')
+            email = st.session_state.user_info.get('email', '')
+            st.write(f"Signed in as: {name if name else 'Google User'}")
+            st.write(f"Email: {email}")
+            if st.button("My account", key="user_panel_btn_google"):
+                st.session_state['show_user_panel'] = True
+            if st.button("Logout", key="sidebar_logout_btn_google"):
                 st.session_state.user_info = None
-            user_email = get_outlook_email()  # Only Outlook email
-            # Removed duplicate 'Signed in as' lines
+                if 'credentials' in st.session_state:
+                    st.session_state.credentials = None
+                if 'gmail_service' in st.session_state:
+                    st.session_state.gmail_service = None
+                import os
+                if os.path.exists('token.pickle'):
+                    os.remove('token.pickle')
+                if os.path.exists('google_token.pkl'):
+                    os.remove('google_token.pkl')
+                st.rerun()
+        elif is_outlook_authenticated():
+            from outlook_auth import get_outlook_name, get_outlook_email, outlook_logout
+            name = get_outlook_name()
+            email = get_outlook_email()
+            st.write(f"Signed in as: {name if name else 'Outlook User'}")
+            st.write(f"Email: {email if email else ''}")
+            if st.button("My account", key="user_panel_btn_outlook"):
+                st.session_state['show_user_panel'] = True
+            if st.button("Logout", key="sidebar_logout_btn_outlook"):
+                outlook_logout()
+                import os
+                if os.path.exists('outlook_token.pkl'):
+                    os.remove('outlook_token.pkl')
+                st.rerun()
 
 if __name__ == "__main__":
     main()

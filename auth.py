@@ -142,7 +142,8 @@ def get_google_auth_url():
 
 
 def handle_auth_callback(code):
-    logger.info("Handling OAuth2 callback")
+    logger.info(f"Handling OAuth2 callback with code: {code}")
+    logger.info(f"Using redirect URI: {REDIRECT_URI}")
     try:
         client_config = {
             "web": {
@@ -155,7 +156,12 @@ def handle_auth_callback(code):
         }
 
         flow = Flow.from_client_config(client_config, scopes=SCOPES, redirect_uri=REDIRECT_URI)
-        flow.fetch_token(code=code)
+        try:
+            flow.fetch_token(code=code)
+        except Exception as fetch_exc:
+            logger.error(f"Google fetch_token failed: {fetch_exc}")
+            st.error("Google authentication failed: The code is invalid, expired, or already used. Please try signing in again. If the problem persists, check your Google Cloud Console redirect URI settings.")
+            return None
         credentials = flow.credentials
 
         # Save credentials to both the old and new pickle files
