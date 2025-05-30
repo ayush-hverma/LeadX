@@ -351,49 +351,40 @@ def load_outlook_token():
     return None
 
 def save_code_verifier(code_verifier, state=None):
-    """Save the PKCE code verifier to a local file, keyed by state."""
+    """Save the PKCE code verifier to a local file."""
     try:
-        # Create a directory for auth files if it doesn't exist
-        auth_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auth_files')
+        # Create a directory for auth files in the current working directory
+        auth_dir = os.path.join(os.getcwd(), 'auth_files')
         os.makedirs(auth_dir, exist_ok=True)
         
-        # Use consistent filename with state
-        filename = os.path.join(auth_dir, f'outlook_code_verifier.pkl' if state else 'outlook_code_verifier.pkl')
+        # Ensure directory has proper permissions
+        os.chmod(auth_dir, 0o755)
         
-        # Save the code verifier
+        # Save the code verifier to a single file
+        filename = os.path.join(auth_dir, 'outlook_code_verifier.pkl')
         with open(filename, 'wb') as f:
             pickle.dump(code_verifier, f)
         logger.info(f"Saved code verifier to file {filename}")
         
-        # Also save a backup without state for fallback
-        backup_filename = os.path.join(auth_dir, 'outlook_code_verifier.pkl')
-        with open(backup_filename, 'wb') as f:
-            pickle.dump(code_verifier, f)
-        logger.info(f"Saved backup code verifier to file {backup_filename}")
+        # Ensure file has proper permissions
+        os.chmod(filename, 0o644)
+        
+        return True
     except Exception as e:
         logger.error(f"Error saving code verifier: {str(e)}")
-        raise
+        st.error(f"Failed to save authentication data: {str(e)}")
+        return False
 
 def load_code_verifier(state=None):
-    """Load the PKCE code verifier from a local file, keyed by state."""
+    """Load the PKCE code verifier from a local file."""
     try:
-        auth_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auth_files')
+        auth_dir = os.path.join(os.getcwd(), 'auth_files')
+        filename = os.path.join(auth_dir, 'outlook_code_verifier.pkl')
         
-        # Try state-specific file first
-        if state:
-            filename = os.path.join(auth_dir, f'outlook_code_verifier.pkl')
-            if os.path.exists(filename):
-                with open(filename, 'rb') as f:
-                    code_verifier = pickle.load(f)
-                logger.info(f"Loaded code verifier from state file {filename}")
-                return code_verifier
-        
-        # Fallback to non-state file
-        fallback = os.path.join(auth_dir, 'outlook_code_verifier.pkl')
-        if os.path.exists(fallback):
-            with open(fallback, 'rb') as f:
+        if os.path.exists(filename):
+            with open(filename, 'rb') as f:
                 code_verifier = pickle.load(f)
-            logger.info(f"Loaded code verifier from fallback file {fallback}")
+            logger.info(f"Loaded code verifier from file {filename}")
             return code_verifier
             
         logger.warning("No code verifier file found")
@@ -403,21 +394,13 @@ def load_code_verifier(state=None):
         return None
 
 def clear_code_verifier(state=None):
-    """Remove code verifier from local file, keyed by state."""
+    """Remove code verifier from local file."""
     try:
-        auth_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auth_files')
+        auth_dir = os.path.join(os.getcwd(), 'auth_files')
+        filename = os.path.join(auth_dir, 'outlook_code_verifier.pkl')
         
-        # Remove state-specific file
-        if state:
-            filename = os.path.join(auth_dir, f'outlook_code_verifier.pkl')
-            if os.path.exists(filename):
-                os.remove(filename)
-                logger.info(f"Removed state code verifier file {filename}")
-        
-        # Also clear fallback file
-        fallback = os.path.join(auth_dir, 'outlook_code_verifier.pkl')
-        if os.path.exists(fallback):
-            os.remove(fallback)
-            logger.info(f"Removed fallback code verifier file {fallback}")
+        if os.path.exists(filename):
+            os.remove(filename)
+            logger.info(f"Removed code verifier file {filename}")
     except Exception as e:
         logger.error(f"Error clearing code verifier: {str(e)}")

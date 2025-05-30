@@ -74,16 +74,17 @@ def lead_exists(lead_id=None, email=None):
         return False
     return collection.count_documents(query) > 0
 
-def delete_lead_by_id(lead_id):
+def delete_lead_by_id(lead_id, user_email):
     """
-    Delete a lead from MongoDB by its lead_id.
+    Delete a specific lead from MongoDB by its lead_id and user_email.
     Returns True if deleted, False otherwise.
     """
     try:
-        result = collection.delete_one({'lead_id': lead_id})
+        result = collection.delete_one({'lead_id': lead_id, 'user_email': user_email})
+        logging.info(f"[MongoDB] Deleted lead {lead_id} for user {user_email}")
         return result.deleted_count > 0
     except Exception as e:
-        print(f"Error deleting lead with lead_id {lead_id}: {e}")
+        logging.error(f"Error deleting lead with lead_id {lead_id}: {e}")
         return False
 
 def delete_lead_by_email(email):
@@ -96,6 +97,20 @@ def delete_lead_by_email(email):
         return result.deleted_count > 0
     except Exception as e:
         print(f"Error deleting lead with email {email}: {e}")
+        return False
+
+def delete_email_by_id(email_id, user_email):
+    """
+    Delete a specific generated email from MongoDB by its _id and user_email.
+    Returns True if deleted, False otherwise.
+    """
+    try:
+        from bson.objectid import ObjectId
+        result = generated_emails_collection.delete_one({'_id': ObjectId(email_id), 'user_email': user_email})
+        logging.info(f"[MongoDB] Deleted email {email_id} for user {user_email}")
+        return result.deleted_count > 0
+    except Exception as e:
+        logging.error(f"Error deleting email with id {email_id}: {e}")
         return False
 
 def save_scheduled_email(email_data):
@@ -198,3 +213,55 @@ def delete_all_generated_emails(user_email):
     except Exception as e:
         print(f"Error deleting all generated emails for {user_email}: {e}")
         return 0
+
+def search_enriched_leads(user_email, search_term=None, filters=None):
+    """
+    Search enriched leads with optional filters.
+    
+    Args:
+        user_email (str): The user's email
+        search_term (str): Optional search term to match against name, email, organization, etc.
+        filters (dict): Optional dictionary of filters (e.g., {'company_industry': 'Technology'})
+    
+    Returns:
+        pandas.DataFrame: Filtered leads data
+    """
+    try:
+        query = {'user_email': user_email}
+        
+        if search_term:
+            # Create a text search query
+            text_query = {
+                '$or': [
+                    {'name': {'$regex': search_term, '$options': 'i'}},
+                    {'email': {'$regex': search_term, '$options': 'i'}},
+                    {'organization': {'$regex': search_term, '$options': 'i'}},
+                    {'title': {'$regex': search_term, '$options': 'i'}},
+                    {'company_industry': {'$regex': search_term, '$options': 'i'}},
+                    {'company_location': {'$regex': search_term, '$options': 'i'}}
+                ]
+            }
+            query.update(text_query)
+        
+        if filters:
+            for key, value in filters.items():
+                if value and value != "All":  # Only add non-empty filters
+                    query[key] = {'$regex': value, '$options': 'i'}
+        
+        leads = list(collection.find(query))
+        import pandas as pd
+        df = pd.DataFrame(leads) if leads else None
+        
+        if df is not None and not df.empty:
+            # Convert ObjectId to string for JSON serialization
+            if '_id' in df.columns:
+                df['_id'] = df['_id'].astype(str)
+            # Ensure lead_id is string
+            if 'lead_id' in df.columns:
+                df['lead_id'] = df['lead_id'].astype(str)
+        
+        return df
+    except Exception as e:
+        import streamlit as st
+        st.error(f"Error searching enriched leads: {e}")
+        return None

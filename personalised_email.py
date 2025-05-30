@@ -18,7 +18,16 @@ warnings.filterwarnings("ignore", category=UserWarning)
 load_dotenv()
 
 # Configure Gemini
-genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
+import logging
+log_formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+file_handler = logging.FileHandler('debug_gemini.log')
+file_handler.setFormatter(log_formatter)
+file_handler.setLevel(logging.INFO)
+if not any(isinstance(h, logging.FileHandler) and h.baseFilename == file_handler.baseFilename for h in logging.getLogger().handlers):
+    logging.getLogger().addHandler(file_handler)
+logging.getLogger().setLevel(logging.INFO)
+
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 class EmailResponse(BaseModel):
     subject: str
@@ -543,9 +552,6 @@ product_database = {
 def generate_email_for_single_lead(lead_details: dict, product_details: str, product_name: str = None) -> dict:
     """Generate a personalized email for a single lead."""
     try:
-        # Log the start of email generation
-        logging.info(f"Starting email generation for lead: {lead_details.get('name', 'Unknown')} (ID: {lead_details.get('id', 'Unknown')})")
-        
         # Use explicit product_name if provided, else extract from product_details
         if product_name is None:
             for key in product_database.keys():
@@ -563,13 +569,12 @@ def generate_email_for_single_lead(lead_details: dict, product_details: str, pro
                             break
             if not product_name:
                 product_name = "our product"  # Fallback if no product name found
-                logging.warning(f"No product name found in product details, using fallback: {product_name}")
 
         recipient_name = lead_details.get('name', 'No recipient')
         recipient_email = lead_details.get('email', 'No email provided')
 
         prompt = f"""
-        Generate a personalized email for the following lead:
+        You are an AI email generator. Your task is to generate a personalized email for a lead.
         
         Lead Details:
         {json.dumps({k: v for k, v in lead_details.items() if k != 'id'}, indent=2)}
@@ -590,142 +595,93 @@ def generate_email_for_single_lead(lead_details: dict, product_details: str, pro
         4. Always use "{product_name}" instead of [PRODUCT_NAME] when referring to the product.
         5. The email will be sent to: {recipient_name} <{recipient_email}>
         
-        Return ONLY the email subject and body in this exact JSON format:
+        You MUST return a valid JSON object with EXACTLY these fields:
         {{
-            "subject": "The subject line",
-            "body": "The email body ending with 'Best Regards,' on a new line"
+            "subject": "Your subject line here",
+            "body": "Your email body here ending with 'Best Regards,' on a new line"
         }}
+        
+        The response must be a valid JSON object with no additional text, markdown, or formatting.
+        Do not include any explanation or other text outside the JSON object.
         """
         
+        #logging.info("[DEBUG] About to call Gemini with prompt:")
+        #logging.info(prompt)
         # Get response from Gemini
-        model = genai.GenerativeModel('gemini-2.0-flash')
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.1,
-                max_output_tokens=5000,
-            )
-        )
-        
-        # Parse the response
         try:
-            response_text = response.text
-            print(f"\n📄 Raw response from Gemini for lead {recipient_name}:")
-            print(response_text)
-            logging.info(f"Raw response from Gemini for lead {recipient_name}: {response_text}")
-            
-            # Clean the response text to ensure it's valid JSON
-            response_text = response_text.strip()
-            
-            # Remove markdown code blocks if present
-            if response_text.startswith('```'):
-                response_text = response_text.split('```', 2)[1]
-            if response_text.endswith('```'):
-                response_text = response_text.rsplit('```', 1)[0]
-            response_text = response_text.strip()
-            
-            # More aggressive JSON cleaning
-            response_text = re.sub(r'\n\s*"', '"', response_text)  # Remove newlines and spaces before quotes
-            response_text = re.sub(r'"\s*\n\s*', '"', response_text)  # Remove newlines and spaces after quotes
-            response_text = re.sub(r'\n\s*}', '}', response_text)  # Remove newlines and spaces before closing brace
-            response_text = re.sub(r'{\s*\n\s*', '{', response_text)  # Remove newlines and spaces after opening brace
-            response_text = re.sub(r',\s*\n\s*', ', ', response_text)  # Clean up commas with newlines
-            response_text = re.sub(r'\s+', ' ', response_text)  # Replace multiple spaces with single space
-            
-            print(f"\n🧹 Cleaned response text:")
-            print(response_text)
-            logging.info(f"Cleaned response text: {response_text}")
-            
-            # Try to parse the JSON directly first
-            try:
-                response_json = json.loads(response_text)
-            except json.JSONDecodeError:
-                # If direct parsing fails, try to extract JSON using regex
-                json_match = re.search(r'\{[^{}]*\}', response_text)
-                if json_match:
-                    try:
-                        response_json = json.loads(json_match.group())
-                    except json.JSONDecodeError:
-                        # If still failing, try to manually construct JSON
-                        subject_match = re.search(r'"subject"\s*:\s*"([^"]*)"', response_text)
-                        body_match = re.search(r'"body"\s*:\s*"([^"]*)"', response_text)
-                        
-                        if subject_match and body_match:
-                            response_json = {
-                                "subject": subject_match.group(1),
-                                "body": body_match.group(1)
-                            }
-                        else:
-                            # Last resort: try to extract any text between quotes after "subject" and "body"
-                            subject_match = re.search(r'subject["\s:]+([^"]+)', response_text, re.IGNORECASE)
-                            body_match = re.search(r'body["\s:]+([^"]+)', response_text, re.IGNORECASE)
-                            
-                            if subject_match and body_match:
-                                response_json = {
-                                    "subject": subject_match.group(1).strip(),
-                                    "body": body_match.group(1).strip()
-                                }
-                            else:
-                                raise ValueError("Could not extract subject and body from response")
-                else:
-                    raise ValueError("No valid JSON found in response")
-            
-            print(f"\n✅ Parsed JSON response:")
-            print(json.dumps(response_json, indent=2))
-            logging.info(f"Parsed JSON response for lead {recipient_name}: {response_json}")
-            
-            # Defensive: ensure 'subject' and 'body' keys exist and are strings
-            subject = response_json.get("subject", "")
-            body = response_json.get("body", "")
-            
-            # Clean and validate subject
-            if isinstance(subject, str):
-                subject = subject.strip()
-            else:
-                subject = str(subject).strip()
-                print(f"⚠️ Subject was not a string, converted to: {subject}")
-                logging.warning(f"Subject was not a string for lead {recipient_name}, converted to: {subject}")
-            
-            # Clean and validate body
-            if isinstance(body, str):
-                body = body.strip()
-            else:
-                body = str(body).strip()
-                print(f"⚠️ Body was not a string, converted to: {body}")
-                logging.warning(f"Body was not a string for lead {recipient_name}, converted to: {body}")
-            
-            if not subject:
-                print(f"❌ Empty subject in model response")
-                logging.error(f"Empty subject in model response for lead {recipient_name}: {response_json}")
-                subject = "[No subject generated]"
-            if not body:
-                print(f"❌ Empty body in model response")
-                logging.error(f"Empty body in model response for lead {recipient_name}: {response_json}")
-                body = "[No body generated]\n\n"
-            
-            body = body.replace("[PRODUCT_NAME]", product_name)
-            if not body.endswith('\n\n'):
-                body = body.rstrip() + '\n\n'
-            
-            print(f"\n✨ Successfully generated email:")
-            print(f"Subject: {subject}")
-            print(f"Body: {body[:100]}...")
-            logging.info(f"Successfully generated email for lead {recipient_name}")
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            #logging.info("[DEBUG] Model instantiated, calling generate_content...")
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.1,
+                    max_output_tokens=5000,
+                )
+            )
+            logging.info("[DEBUG] Gemini API call succeeded.")
+            #logging.info(f"[DEBUG] Gemini response object: {response}")
+            if response is None:
+                logging.error("[DEBUG] Gemini API returned None response!")
+                raise ValueError("Gemini API returned None response!")
+            if not hasattr(response, 'text'):
+                #logging.error(f"[DEBUG] Gemini response missing 'text' attribute: {dir(response)}")
+                raise ValueError("Gemini response missing 'text' attribute!")
+        except Exception as e:
+            import traceback
+            #logging.error(f"\n❌ Gemini API call failed: {str(e)}")
+            traceback.print_exc()
+            logging.error(f"Gemini API call failed: {str(e)}", exc_info=True)
+            logging.info("[DEBUG] Returning error dict from Gemini API call failure.")
             return {
-                "subject": subject,
-                "body": body,
+                "subject": "Error generating email",
+                "body": f"Gemini API call failed: {str(e)}\n\n",
                 "lead_id": lead_details.get("id", ""),
                 "recipient": recipient_name,
                 "recipient_email": recipient_email
             }
+        
+        # Parse the response
+        try:
+            response_text = response.text.strip()
+            #logging.info(f"[DEBUG] Raw response from Gemini for lead {recipient_name}:\n{response_text}")
             
+            # Try to find JSON in the response
+            json_match = re.search(r'\{[\s\S]*\}', response_text)
+            if json_match:
+                try:
+                    response_json = json.loads(json_match.group())
+                    if not isinstance(response_json, dict):
+                        raise ValueError("Response is not a dictionary")
+                    
+                    # Validate required fields
+                    if "subject" not in response_json or "body" not in response_json:
+                        raise ValueError("Missing required fields in response")
+                    
+                    #logging.info(f"[DEBUG] Parsed JSON from Gemini:\n{json.dumps(response_json, indent=2)}")
+                    body = response_json.get("body", "")
+                    body = body.replace("[PRODUCT_NAME]", product_name)
+                    if not body.endswith('\n\n'):
+                        body = body.rstrip() + '\n\n'
+                    return {
+                        "subject": response_json.get("subject", ""),
+                        "body": body,
+                        "lead_id": lead_details.get("id", ""),
+                        "recipient": recipient_name,
+                        "recipient_email": recipient_email
+                    }
+                except json.JSONDecodeError as je:
+                    logging.error(f"[DEBUG] JSON decode error: {je}")
+                    raise ValueError(f"Invalid JSON format: {je}")
+            else:
+                #logging.error(f"[DEBUG] No JSON found in Gemini response!\n{response_text}")
+                raise ValueError("No JSON found in response")
         except Exception as e:
-            print(f"\n❌ Error parsing response: {str(e)}")
-            print(f"Response text: {response.text if 'response' in locals() else ''}")
-            logging.error(f"Error parsing response for lead {recipient_name}: {str(e)} | Response text: {response.text if 'response' in locals() else ''}")
+            logging.error(f"[DEBUG] Exception while parsing Gemini response: {e}")
+            #logging.error(f"[DEBUG] Full response text: {response_text if 'response_text' in locals() else ''}")
+            logging.error(f"Error parsing response: {str(e)}")
             return {
-                "subject": "[No subject generated]",
-                "body": "[No body generated]\n\n",
+                "subject": "Error generating email",
+                "body": f"An error occurred while generating the email: {str(e)}\n\n",
                 "lead_id": lead_details.get("id", ""),
                 "recipient": recipient_name,
                 "recipient_email": recipient_email
@@ -760,11 +716,10 @@ def generate_email_for_multiple_leads(leads_list: list, product_details: str) ->
         list: List of dictionaries, each containing 'subject', 'body', and 'lead_id' of the email
     """
     if not leads_list:
-        print("❌ Error: No leads provided in the list")
-        logging.error("No leads provided in the list")
+        logging.error("Error: No leads provided in the list")
         raise ValueError("No leads provided in the list")
 
-    print(f"\n📧 Starting email generation for {len(leads_list)} leads")
+    logging.info(f"\n Starting email generation for {len(leads_list)} leads")
     logging.info(f"Starting email generation for {len(leads_list)} leads")
     all_emails = []
     batch_size = 5
@@ -773,7 +728,7 @@ def generate_email_for_multiple_leads(leads_list: list, product_details: str) ->
 
     for i in range(0, len(leads_list), batch_size):
         batch_leads = leads_list[i:i + batch_size]
-        print(f"\n🔄 Processing batch {i//batch_size + 1} of {(len(leads_list) + batch_size - 1)//batch_size}")
+        logging.info(f"\n Processing batch {i//batch_size + 1} of {(len(leads_list) + batch_size - 1)//batch_size}")
         logging.info(f"Processing batch {i//batch_size + 1} of {(len(leads_list) + batch_size - 1)//batch_size}")
         batch_emails = []
         
@@ -781,7 +736,7 @@ def generate_email_for_multiple_leads(leads_list: list, product_details: str) ->
             try:
                 lead_name = lead.get('name', 'Unknown')
                 lead_id = lead.get('lead_id', lead.get('id', ''))
-                print(f"\n📝 Generating email for lead: {lead_name} (ID: {lead_id})")
+                logging.info(f"\n Generating email for lead: {lead_name} (ID: {lead_id})")
                 logging.info(f"Generating email for lead: {lead_name} (ID: {lead_id})")
                 
                 result = generate_email_for_single_lead(lead, product_details)
@@ -789,11 +744,9 @@ def generate_email_for_multiple_leads(leads_list: list, product_details: str) ->
                 body = result.get('body', '').strip()
                 
                 if not subj or subj == '[No subject generated]' or not body or body == '[No body generated]':
-                    print(f"❌ Failed to generate valid email for lead: {lead_name} (ID: {lead_id})")
-                    print(f"   Subject: '{subj}'")
-                    print(f"   Body: '{body[:100]}...'")
-                    logging.error(f"Failed to generate valid email for lead: {lead_name} (ID: {lead_id})")
-                    logging.error(f"Subject: '{subj}' | Body: '{body[:40]}...'")
+                    logging.error(f" Failed to generate valid email for lead: {lead_name} (ID: {lead_id})")
+                    logging.error(f"   Subject: '{subj}'")
+                    logging.error(f"   Body: '{body[:100]}...'")
                     failed_leads += 1
                     batch_emails.append({
                         'subject': '[No subject generated]',
@@ -801,16 +754,14 @@ def generate_email_for_multiple_leads(leads_list: list, product_details: str) ->
                         'lead_id': str(lead_id)
                     })
                 else:
-                    print(f"✅ Successfully generated email for lead: {lead_name} (ID: {lead_id})")
-                    print(f"   Subject: '{subj}'")
-                    logging.info(f"Successfully generated email for lead: {lead_name} (ID: {lead_id})")
-                    logging.info(f"Subject: '{subj}'")
+                    logging.info(f" Successfully generated email for lead: {lead_name} (ID: {lead_id})")
+                    logging.info(f"   Subject: '{subj}'")
                     successful_leads += 1
                     batch_emails.append(result)
             except Exception as e:
                 lead_name = lead.get('name', 'Unknown')
                 lead_id = lead.get('lead_id', lead.get('id', ''))
-                print(f"❌ Error processing lead {lead_name} (ID: {lead_id}): {str(e)}")
+                logging.error(f"Error processing lead {lead_name} (ID: {lead_id}): {str(e)}")
                 logging.error(f"Error processing lead {lead_name} (ID: {lead_id}): {str(e)}")
                 failed_leads += 1
                 batch_emails.append({
@@ -821,14 +772,14 @@ def generate_email_for_multiple_leads(leads_list: list, product_details: str) ->
         
         all_emails.extend(batch_emails)
         if i + batch_size < len(leads_list):
-            print("\n⏳ Waiting 2 seconds before processing next batch...")
+            logging.info("\n Waiting 2 seconds before processing next batch...")
             logging.info("Waiting 2 seconds before processing next batch...")
             time.sleep(2)
     
-    print(f"\n📊 Email generation completed:")
-    print(f"   ✅ Successful: {successful_leads}")
-    print(f"   ❌ Failed: {failed_leads}")
-    print(f"   📝 Total: {len(leads_list)}")
+    logging.info(f"\n Email generation completed:")
+    logging.info(f"   Successful: {successful_leads}")
+    logging.info(f"   Failed: {failed_leads}")
+    logging.info(f"   Total: {len(leads_list)}")
     logging.info(f"Email generation completed. Success: {successful_leads}, Failed: {failed_leads}, Total: {len(leads_list)}")
     return all_emails
 
@@ -886,10 +837,10 @@ FOLLOWUP_PROMPTS = {
 Generate a personalized initial outreach email for the following lead:
 
 Lead Details:
-{{lead_details}}
+{lead_details}
 
 Product Details:
-{{product_details}}
+{product_details}
 
 Follow this style guide for the subject:
 {subject_style}
@@ -904,20 +855,29 @@ Important:
 4. Always use "{product_name}" instead of [PRODUCT_NAME] when referring to the product.
 5. The email will be sent to: {recipient_name} <{recipient_email}>
 
-Return ONLY the email subject and body in this exact JSON format:
-{
-    "subject": "The subject line",
-    "body": "The email body ending with 'Best Regards,' on a new line"
-}
+You MUST return a valid JSON object with EXACTLY these fields:
+{{
+    "subject": "Your subject line here",
+    "body": "Your email body here ending with 'Best Regards,' on a new line"
+}}
+
+The response must be a valid JSON object with no additional text, markdown, or formatting.
+Do not include any explanation or other text outside the JSON object.
 ''',
     3: '''# Gemini prompt for Day 3 follow-up
 Generate a personalized follow-up email for the following lead who has not responded to the initial outreach sent 3 days ago.
 
 Lead Details:
-{{lead_details}}
+{lead_details}
 
 Product Details:
-{{product_details}}
+{product_details}
+
+Follow this style guide for the subject:
+{subject_style}
+
+Follow this style guide for the body:
+{body_style}
 
 Instructions:
 - Reference the previous email briefly, but do NOT repeat the original content.
@@ -929,20 +889,29 @@ Instructions:
 - Do NOT mention the lack of response directly or sound pushy.
 - End the email body with "Best Regards," on a new line, followed by a blank line. Do NOT include the sender's name.
 
-Return ONLY the email subject and body in this exact JSON format:
-{
-    "subject": "The subject line",
-    "body": "The email body ending with 'Best Regards,' on a new line"
-}
+You MUST return a valid JSON object with EXACTLY these fields:
+{{
+    "subject": "Your subject line here",
+    "body": "Your email body here ending with 'Best Regards,' on a new line"
+}}
+
+The response must be a valid JSON object with no additional text, markdown, or formatting.
+Do not include any explanation or other text outside the JSON object.
 ''',
     8: '''# Gemini prompt for 8th day follow-up
 Generate a personalized second follow-up email for the following lead who has not responded to previous emails (initial and 3-day follow-up).
 
 Lead Details:
-{{lead_details}}
+{lead_details}
 
 Product Details:
-{{product_details}}
+{product_details}
+
+Follow this style guide for the subject:
+{subject_style}
+
+Follow this style guide for the body:
+{body_style}
 
 Instructions:
 - Reference your previous attempts to connect, but do NOT sound desperate or repeat earlier content.
@@ -954,20 +923,29 @@ Instructions:
 - Do NOT mention the lack of response directly or use guilt-tripping language.
 - End the email body with "Best Regards," on a new line, followed by a blank line. Do NOT include the sender's name.
 
-Return ONLY the email subject and body in this exact JSON format:
-{
-    "subject": "The subject line",
-    "body": "The email body ending with 'Best Regards,' on a new line"
-}
+You MUST return a valid JSON object with EXACTLY these fields:
+{{
+    "subject": "Your subject line here",
+    "body": "Your email body here ending with 'Best Regards,' on a new line"
+}}
+
+The response must be a valid JSON object with no additional text, markdown, or formatting.
+Do not include any explanation or other text outside the JSON object.
 ''',
     17: '''# Gemini prompt for 17th day follow-up
 Generate a personalized third follow-up email for the following lead who has not responded to previous outreach attempts (initial, 3-day, and 8-day follow-ups).
 
 Lead Details:
-{{lead_details}}
+{lead_details}
 
 Product Details:
-{{product_details}}
+{product_details}
+
+Follow this style guide for the subject:
+{subject_style}
+
+Follow this style guide for the body:
+{body_style}
 
 Instructions:
 - Briefly acknowledge your previous emails without repeating their content.
@@ -979,20 +957,29 @@ Instructions:
 - Do NOT mention the lack of response directly or use negative language.
 - End the email body with "Best Regards," on a new line, followed by a blank line. Do NOT include the sender's name.
 
-Return ONLY the email subject and body in this exact JSON format:
-{
-    "subject": "The subject line",
-    "body": "The email body ending with 'Best Regards,' on a new line"
-}
+You MUST return a valid JSON object with EXACTLY these fields:
+{{
+    "subject": "Your subject line here",
+    "body": "Your email body here ending with 'Best Regards,' on a new line"
+}}
+
+The response must be a valid JSON object with no additional text, markdown, or formatting.
+Do not include any explanation or other text outside the JSON object.
 ''',
     24: '''# Gemini prompt for 24th day follow-up
 Generate a personalized fourth follow-up email for the following lead who has not responded to any previous outreach (initial, 3-day, 8-day, and 17-day follow-ups).
 
 Lead Details:
-{{lead_details}}
+{lead_details}
 
 Product Details:
-{{product_details}}
+{product_details}
+
+Follow this style guide for the subject:
+{subject_style}
+
+Follow this style guide for the body:
+{body_style}
 
 Instructions:
 - Reference your previous attempts to connect, but keep it brief and professional.
@@ -1003,20 +990,29 @@ Instructions:
 - End with a clear, non-intrusive CTA (e.g., "If now isn't the right time, just let me know—happy to reconnect later.").
 - End the email body with "Best Regards," on a new line, followed by a blank line. Do NOT include the sender's name.
 
-Return ONLY the email subject and body in this exact JSON format:
-{
-    "subject": "The subject line",
-    "body": "The email body ending with 'Best Regards,' on a new line"
-}
+You MUST return a valid JSON object with EXACTLY these fields:
+{{
+    "subject": "Your subject line here",
+    "body": "Your email body here ending with 'Best Regards,' on a new line"
+}}
+
+The response must be a valid JSON object with no additional text, markdown, or formatting.
+Do not include any explanation or other text outside the JSON object.
 ''',
     30: '''# Gemini prompt for 30th day follow-up
 Generate a final personalized follow-up email for the following lead who has not responded to any previous outreach (initial, 3-day, 8-day, 17-day, and 24-day follow-ups).
 
 Lead Details:
-{{lead_details}}
+{lead_details}
 
 Product Details:
-{{product_details}}
+{product_details}
+
+Follow this style guide for the subject:
+{subject_style}
+
+Follow this style guide for the body:
+{body_style}
 
 Instructions:
 - Politely acknowledge your previous outreach and that this will be your last follow-up unless you hear back.
@@ -1027,15 +1023,18 @@ Instructions:
 - End with a courteous, open-ended CTA (e.g., "If you'd like to revisit this in the future, just reply to this email.").
 - End the email body with "Best Regards," on a new line, followed by a blank line. Do NOT include the sender's name.
 
-Return ONLY the email subject and body in this exact JSON format:
-{
-    "subject": "The subject line",
-    "body": "The email body ending with 'Best Regards,' on a new line"
-}
-''',
+You MUST return a valid JSON object with EXACTLY these fields:
+{{
+    "subject": "Your subject line here",
+    "body": "Your email body here ending with 'Best Regards,' on a new line"
+}}
+
+The response must be a valid JSON object with no additional text, markdown, or formatting.
+Do not include any explanation or other text outside the JSON object.
+'''
 }
 
-def main():
+def main(): 
     """
     Main function placeholder. No mock data or test calls.
     """
@@ -1061,7 +1060,7 @@ def get_product_details(product_name):
         return None
     return None
 
-def generate_email_for_single_lead_with_custom_prompt(lead_details: dict, product_details: str, custom_prompt: str, product_name: str = None) -> dict:
+def generate_email_for_single_lead_with_custom_prompt(lead_details: dict, product_details: str, day: int, product_name: str = None) -> dict:
     """
     Generate a personalized email for a single lead using a custom prompt (for follow-ups).
     """
@@ -1091,56 +1090,128 @@ def generate_email_for_single_lead_with_custom_prompt(lead_details: dict, produc
 
         # --- FIX: Inject subject_style and body_style if needed ---
         # If the prompt expects {subject_style} or {body_style}, inject them
-        prompt = custom_prompt
-        if '{subject_style}' in prompt or '{body_style}' in prompt:
-            from personalised_email import subject_style, body_style
-            prompt = prompt.format(
-                lead_details=json.dumps({k: v for k, v in lead_details.items() if k != 'id'}, indent=2),
-                product_details=product_details,
-                product_name=product_name,
-                recipient_name=recipient_name,
-                recipient_email=recipient_email,
-                subject_style=subject_style,
-                body_style=body_style
-            )
-        else:
-            prompt = prompt.format(
-                lead_details=json.dumps({k: v for k, v in lead_details.items() if k != 'id'}, indent=2),
-                product_details=product_details,
-                product_name=product_name,
-                recipient_name=recipient_name,
-                recipient_email=recipient_email
-            )
-
+        prompt = FOLLOWUP_PROMPTS.get(day, "").strip()
+        #logging.info("[DEBUG] Initial prompt before injecting styles:")
+        #logging.info(prompt)
+        # logging.info("[DEBUG] Lead details:")
+        # logging.info(json.dumps({k: v for k, v in lead_details.items() if k != 'id'}, indent=2))
+        # logging.info("[DEBUG] Product details:")
+        # logging.info(json.dumps(product_details, indent=2) if isinstance(product_details, dict) else product_details)
+        #logging.info("[DEBUG] Subject style:")
+        #logging.info('{subject_style}' in prompt)
+        #logging.info("[DEBUG] Body style:")
+        #logging.info('{body_style}' in prompt)
+        #logging.info(('{subject_style}' in prompt) or ('{body_style}' in prompt))
+        if product_details is None:
+            #logging.error("[DEBUG] product_details is None, setting to empty string for prompt formatting.")
+            product_details = ""
+        try:
+            if ('{subject_style}' in prompt) or ('{body_style}' in prompt):
+                prompt = prompt.format(
+                    lead_details=json.dumps({k: v for k, v in lead_details.items() if k != 'id'}, indent=2),
+                    product_details=product_details,
+                    product_name=product_name,
+                    recipient_name=recipient_name,
+                    recipient_email=recipient_email,
+                    subject_style=subject_style,
+                    body_style=body_style
+                )
+                #logging.info("[DEBUG] Prompt with style guides injected:")
+                #logging.info(prompt)
+            else:
+                prompt = prompt.format(
+                    lead_details=json.dumps({k: v for k, v in lead_details.items() if k != 'id'}, indent=2),
+                    product_details=json.dumps(product_details, indent=2) if isinstance(product_details, dict) else product_details,
+                    product_name=product_name,
+                    recipient_name=recipient_name,
+                    recipient_email=recipient_email
+                )
+                #logging.info("[DEBUG] Else Prompt without style guides injected:")
+                logging.info(prompt)
+        except Exception as e:
+            logging.error(f"[DEBUG] Exception during prompt formatting: {e}")
+            #logging.error(f"[DEBUG] Prompt before formatting: {prompt}")
+            #logging.error(f"[DEBUG] lead_details: {lead_details}")
+            #logging.error(f"[DEBUG] product_details: {product_details}")
+            #logging.error(f"[DEBUG] product_name: {product_name}")
+            #logging.error(f"[DEBUG] recipient_name: {recipient_name}")
+            #logging.error(f"[DEBUG] recipient_email: {recipient_email}")
+            #logging.error(f"[DEBUG] subject_style: {subject_style}")
+            #logging.error(f"[DEBUG] body_style: {body_style}")
+            #raise
+        #logging.info("[DEBUG] About to call Gemini with prompt:")
+        #logging.info(prompt)
         # Get response from Gemini
-        model = genai.GenerativeModel('gemini-2.0-flash')
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.1,
-                max_output_tokens=5000,
+        try:
+            model = genai.GenerativeModel('gemini-2.0-flash')
+            #logging.info("[DEBUG] Model instantiated, calling generate_content...")
+            response = model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.1,
+                    max_output_tokens=5000,
+                )
             )
-        )
+            logging.info("[DEBUG] Gemini API call succeeded.")
+            #logging.info(f"[DEBUG] Gemini response object: {response}")
+            if response is None:
+                logging.error("[DEBUG] Gemini API returned None response!")
+                raise ValueError("Gemini API returned None response!")
+            if not hasattr(response, 'text'):
+                logging.error(f"[DEBUG] Gemini response missing 'text' attribute: {dir(response)}")
+                raise ValueError("Gemini response missing 'text' attribute!")
+        except Exception as e:
+            import traceback
+            logging.error(f"\n Gemini API call failed: {str(e)}")
+            traceback.print_exc()
+            logging.error(f"Gemini API call failed: {str(e)}", exc_info=True)
+            logging.info("[DEBUG] Returning error dict from Gemini API call failure.")
+            return {
+                "subject": "Error generating email",
+                "body": f"Gemini API call failed: {str(e)}\n\n",
+                "lead_id": lead_details.get("id", ""),
+                "recipient": recipient_name,
+                "recipient_email": recipient_email
+            }
+        
         # Parse the response
         try:
-            response_text = response.text
-            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            response_text = response.text.strip()
+            #logging.info(f"[DEBUG] Raw response from Gemini for lead {recipient_name}:\n{response_text}")
+            
+            # Try to find JSON in the response
+            json_match = re.search(r'\{[\s\S]*\}', response_text)
             if json_match:
-                response_json = json.loads(json_match.group())
-                body = response_json.get("body", "")
-                body = body.replace("[PRODUCT_NAME]", product_name)
-                if not body.endswith('\n\n'):
-                    body = body.rstrip() + '\n\n'
-                return {
-                    "subject": response_json.get("subject", ""),
-                    "body": body,
-                    "lead_id": lead_details.get("id", ""),
-                    "recipient": recipient_name,
-                    "recipient_email": recipient_email
-                }
+                try:
+                    response_json = json.loads(json_match.group())
+                    if not isinstance(response_json, dict):
+                        raise ValueError("Response is not a dictionary")
+                    
+                    # Validate required fields
+                    if "subject" not in response_json or "body" not in response_json:
+                        raise ValueError("Missing required fields in response")
+                    
+                    #logging.info(f"[DEBUG] Parsed JSON from Gemini:\n{json.dumps(response_json, indent=2)}")
+                    body = response_json.get("body", "")
+                    body = body.replace("[PRODUCT_NAME]", product_name)
+                    if not body.endswith('\n\n'):
+                        body = body.rstrip() + '\n\n'
+                    return {
+                        "subject": response_json.get("subject", ""),
+                        "body": body,
+                        "lead_id": lead_details.get("id", ""),
+                        "recipient": recipient_name,
+                        "recipient_email": recipient_email
+                    }
+                except json.JSONDecodeError as je:
+                    logging.error(f"[DEBUG] JSON decode error: {je}")
+                    raise ValueError(f"Invalid JSON format: {je}")
             else:
+                #logging.error(f"[DEBUG] No JSON found in Gemini response!\n{response_text}")
                 raise ValueError("No JSON found in response")
         except Exception as e:
+            logging.error(f"[DEBUG] Exception while parsing Gemini response: {e}")
+            #logging.error(f"[DEBUG] Full response text: {response_text if 'response_text' in locals() else ''}")
             logging.error(f"Error parsing response: {str(e)}")
             return {
                 "subject": "Error generating email",

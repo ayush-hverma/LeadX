@@ -54,6 +54,8 @@ email_results/
 # Client secrets
 client_secrets.json
 
+# Auth files
+auth_files/
 outlook_code_verifier.pkl
 outlook_token.pkl
 google_token.pkl
