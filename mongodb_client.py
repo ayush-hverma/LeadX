@@ -13,6 +13,7 @@ db = client['LeadX']  # Use your database name
 collection = db['enriched_leads']  # Use your collection name
 generated_emails_collection = db['generated_emails']  # Use your collection name
 scheduled_emails_collection = db['scheduled_emails']  # New collection for scheduled emails
+signatures_collection = db['signatures']  # New collection for user signatures
 
 def save_enriched_data(data, user_email):
     """
@@ -264,4 +265,40 @@ def search_enriched_leads(user_email, search_term=None, filters=None):
     except Exception as e:
         import streamlit as st
         st.error(f"Error searching enriched leads: {e}")
+        return None
+
+def save_signature(user_email, name, company, linkedin_url):
+    """
+    Save or update a user's signature in MongoDB.
+    """
+    try:
+        # Update if exists, insert if doesn't exist
+        result = signatures_collection.update_one(
+            {'user_email': user_email},
+            {
+                '$set': {
+                    'name': name,
+                    'company': company,
+                    'linkedin_url': linkedin_url,
+                    'user_email': user_email
+                }
+            },
+            upsert=True
+        )
+        logging.info(f"[MongoDB] Saved/Updated signature for {user_email}")
+        return True
+    except Exception as e:
+        logging.error(f"[MongoDB] Failed to save signature for {user_email}: {e}")
+        return False
+
+def get_signature(user_email):
+    """
+    Get a user's signature from MongoDB.
+    Returns None if no signature exists.
+    """
+    try:
+        signature = signatures_collection.find_one({'user_email': user_email})
+        return signature
+    except Exception as e:
+        logging.error(f"[MongoDB] Failed to get signature for {user_email}: {e}")
         return None

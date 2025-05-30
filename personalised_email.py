@@ -20,11 +20,10 @@ load_dotenv()
 # Configure Gemini
 import logging
 log_formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-file_handler = logging.FileHandler('debug_gemini.log')
-file_handler.setFormatter(log_formatter)
-file_handler.setLevel(logging.INFO)
-if not any(isinstance(h, logging.FileHandler) and h.baseFilename == file_handler.baseFilename for h in logging.getLogger().handlers):
-    logging.getLogger().addHandler(file_handler)
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+console_handler.setLevel(logging.INFO)
+logging.getLogger().addHandler(console_handler)
 logging.getLogger().setLevel(logging.INFO)
 
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -66,7 +65,7 @@ It should be a short, personalized email (150-200 words) to a potential lead who
                     4.  Focus on value (not features) — Position [PRODUCT_NAME] around a problem or opportunity that matters to them. Avoid a hard sell—offer insight, benefit, or a useful idea that shows you can help.
                     5.  Keep it short and natural — Write like a human, not a sales robot. 
                     6.  End with a simple CTA (e.g., "open to a quick chat?" or "would you be interested in exploring this further?").
-                    7.  End the email with "Best Regards," on a new line, followed by a blank line (the system will automatically add the sender's name on the next line)
+                    7.  End the email with "Best Regards," on a new line, followed by a blank line
 
 When describing the product, include:
 1.  Start with the product name and then go on to describe the product.
@@ -114,7 +113,7 @@ Humans express feelings impulsively or with less filter:
     •   wow, amazing, omg, oh my god, oh my gosh, oh my gosh, oh my gosh, aww, haha, lol, rofl, lmao, hehehe,  damn, smh, idk, meh, pfft, yikes, whaaat, no way, sigh, yay, wuhoo, hell yeah, hell no, hell yeah, hell no,hahaha, haha, woohoo, woot, yay, yaaay, whoa, woah, omg, oh my god, lol, lmao, rofl, hehe, heehee, yaaas, yesss, wow, wowza, omgosh, oh wow, aww, awww, whew, phew, omg yaaay, ooooh, oooh la la, huzzah, let's gooo, heck yeah, hell yeah, oh!, ohhh, huh?, no way!, whaaat?!, yikes, dang, daaaang, whaaat the—, ugh, ughhh, meh, pfft, grrr, smh, sigh, sheesh, huhh, etc.
     •   love it, hate that, so cool, super weird, so bad, so good, so happy, so sad, so excited, so nervous, hahaha, haters gonna hate, lovers gonna love, etc.
 
-Important: The email body should end with "Best Regards," on a new line, followed by a blank line. DO NOT include the sender's name in the email body - it will be added automatically by the system.
+Important: The email body should end with "Best Regards," on a new line, followed by a blank line.
 """
 
 product_database = {
@@ -880,6 +879,8 @@ Follow this style guide for the body:
 {body_style}
 
 Instructions:
+- DO NOT PUT phrases like "I was checking out your website" or "I was checking out your LinkedIn profile" in the body of the email.
+- DO NOT PUT phrases like "I am reaching out from PanScience Innovations" in the body of the email.
 - Reference the previous email briefly, but do NOT repeat the original content.
 - Politely remind the lead of the value or benefit of {product_name} for their specific context.
 - Add a new, relevant insight, use case, or benefit that was not mentioned in the initial email.
@@ -914,6 +915,8 @@ Follow this style guide for the body:
 {body_style}
 
 Instructions:
+- DO NOT PUT phrases like "I was checking out your website" or "I was checking out your LinkedIn profile" in the body of the email.
+- DO NOT PUT phrases like "I am reaching out from PanScience Innovations" in the body of the email.
 - Reference your previous attempts to connect, but do NOT sound desperate or repeat earlier content.
 - Share a new, compelling benefit, case study, or testimonial relevant to the lead's industry or role.
 - Emphasize how {product_name} can address a specific pain point or opportunity for the lead.
@@ -948,6 +951,8 @@ Follow this style guide for the body:
 {body_style}
 
 Instructions:
+- DO NOT PUT phrases like "I was checking out your website" or "I was checking out your LinkedIn profile" in the body of the email.
+- DO NOT PUT phrases like "I am reaching out from PanScience Innovations" in the body of the email.
 - Briefly acknowledge your previous emails without repeating their content.
 - Offer a new perspective, recent update, or industry trend that makes {product_name} especially relevant now.
 - Highlight a unique feature or benefit of {product_name} that has not been mentioned before.
@@ -982,6 +987,8 @@ Follow this style guide for the body:
 {body_style}
 
 Instructions:
+- DO NOT PUT phrases like "I was checking out your website" or "I was checking out your LinkedIn profile" in the body of the email.
+- DO NOT PUT phrases like "I am reaching out from PanScience Innovations" in the body of the email.
 - Reference your previous attempts to connect, but keep it brief and professional.
 - Share a new, relevant success story, testimonial, or recent achievement of {product_name} that could resonate with the lead.
 - Emphasize the potential missed opportunity or value for the lead's business, but do NOT use guilt or pressure.
@@ -1015,6 +1022,8 @@ Follow this style guide for the body:
 {body_style}
 
 Instructions:
+- DO NOT PUT phrases like "I was checking out your website" or "I was checking out your LinkedIn profile" in the body of the email.
+- DO NOT PUT phrases like "I am reaching out from PanScience Innovations" in the body of the email.
 - Politely acknowledge your previous outreach and that this will be your last follow-up unless you hear back.
 - Summarize the key value or unique benefit of {product_name} for the lead's business in one or two sentences.
 - Offer to provide more information, answer questions, or reconnect in the future if their priorities change.

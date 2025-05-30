@@ -9,6 +9,7 @@ import streamlit as st
 from auth import get_user_name, get_user_email
 from personalised_email import generate_email_for_single_lead
 from outlook_auth import is_outlook_authenticated
+from mongodb_client import get_signature
 
 # Constants for pipeline configuration
 BATCH_SIZE = 50  # Number of leads to process in each batch
@@ -112,6 +113,10 @@ class EmailGenerationPipeline:
             sender_name = (st.session_state.get('outlook_user_info', {}) or {}).get('displayName') or (st.session_state.get('outlook_user_info', {}) or {}).get('name') or ''
         if not sender_email:
             sender_email = (st.session_state.get('outlook_user_info', {}) or {}).get('mail') or (st.session_state.get('outlook_user_info', {}) or {}).get('email') or ''
+
+        # Get user's signature
+        signature = get_signature(sender_email)
+        
         lead_details = {
             "lead_id": str(lead.get('id', lead.get('lead_id', ''))),
             "name": str(lead.get('name', '')),
@@ -125,10 +130,16 @@ class EmailGenerationPipeline:
         try:
             result = generate_email_for_single_lead(lead_details, formatted_product, product_name=product_name)
             body = result.get("body", "")
-            # Use only the first name for the signature and from_name
-            first_name = sender_name.split()[0] if sender_name else ""
+            
+            # Add signature if it exists
             if body.strip().endswith("Best Regards,"):
-                body = body.rstrip() + f"\n{first_name}\n"
+                if signature:
+                    body = body.rstrip() + f"\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
+                else:
+                    # Fallback to first name if no signature
+                    first_name = sender_name.split()[0] if sender_name else ""
+                    body = body.rstrip() + f"\n{first_name}\n"
+                    
             return {
                 "final_result": {
                     "subject": result.get("subject", ""),

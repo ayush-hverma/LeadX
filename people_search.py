@@ -52,6 +52,7 @@ def get_people_search_results(
         payload = {
             "per_page": per_page,
             "page": current_page,
+            "include_similar_titles": include_similar_titles
         }
         if person_titles and person_titles[0].strip():
             payload["person_titles"] = person_titles
@@ -66,13 +67,11 @@ def get_people_search_results(
         try:
             response = requests.post(url, headers=headers, json=payload)
             print(f"Apollo.io API status: {response.status_code}")
-            #print(f"Apollo.io API response: {response.text[:1000]}")
             response.raise_for_status()
             data = response.json()
             print(f"\nPage {current_page} - Response has {len(data.get('people', []))} people")
             if 'people' in data:
                 for person in data['people']:
-                    #print(f"[DEBUG] Raw person: {json.dumps(person, indent=2)}")
                     if person.get('email_status') != 'unavailable':
                         org_name = person.get('organization', {}).get('name')
                         if not org_name or org_name == 'N/A':

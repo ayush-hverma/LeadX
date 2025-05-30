@@ -12,7 +12,7 @@ import io
 import dotenv
 import logging
 from personalised_email import product_database, generate_email_for_single_lead, generate_email_for_multiple_leads, get_product_details
-from auth import init_auth, is_authenticated, get_google_auth_url, handle_auth_callback, get_user_email, get_user_name, logout, log_sign_in_attempt
+from auth import init_auth, is_authenticated, get_google_auth_url, handle_auth_callback, get_user_name, logout, log_sign_in_attempt
 from outlook_auth import init_outlook_auth, get_outlook_auth_url, handle_outlook_callback, is_outlook_authenticated, get_outlook_email
 from urllib.parse import parse_qs, urlparse
 from flask import Flask, request, jsonify
@@ -23,7 +23,7 @@ import msal
 import requests
 from outlook_sender import prepare_outlook_email_payloads, OutlookSender
 from outlook_auth import get_outlook_name
-from mongodb_client import save_enriched_data, save_generated_emails, collection, generated_emails_collection, lead_exists, delete_lead_by_id, delete_email_by_id
+from mongodb_client import save_enriched_data, save_generated_emails, collection, generated_emails_collection, lead_exists, delete_lead_by_id, delete_email_by_id, get_signature, save_signature
 import bson
 
 # Initialize Flask app
@@ -87,39 +87,13 @@ def get_user_info(access_token):
     response = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers)
     return response.json()
 
-# Azure AD configuration
-CLIENT_ID = os.getenv("CLIENT_ID")
-CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-TENANT_ID = os.getenv("TENANT_ID")
-REDIRECT_URI = os.getenv("REDIRECT_URI")
-
-# Microsoft Graph API endpoints
-AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
-SCOPE = ["User.Read"]
-
-def init_msal_app():
-    return msal.ConfidentialClientApplication(
-        CLIENT_ID,
-        authority=AUTHORITY,
-        client_credential=CLIENT_SECRET
-    )
-
-def get_auth_url():
-    return f"{AUTHORITY}/oauth2/v2.0/authorize?client_id={CLIENT_ID}&response_type=code&redirect_uri={REDIRECT_URI}&scope={' '.join(SCOPE)}"
-
-def get_token_from_code(code):
-    app = init_msal_app()
-    result = app.acquire_token_by_authorization_code(
-        code,
-        scopes=SCOPE,
-        redirect_uri=REDIRECT_URI
-    )
-    return result
-
-def get_user_info(access_token):
-    headers = {'Authorization': f'Bearer {access_token}'}
-    response = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers)
-    return response.json()
+def get_user_email():
+    """Get the email of the currently authenticated user."""
+    if is_authenticated():
+        return st.session_state.get('user_email')
+    elif is_outlook_authenticated():
+        return get_outlook_email()
+    return None
 
 def handle_auth_flow():
     """Handle the authentication flow."""
@@ -193,12 +167,161 @@ def handle_auth_flow():
         
         st.stop()
 
+@app.route('/api/generate-email', methods=['POST'])
+def generate_email():
+    try:
+        data = request.get_json()
+        leads = data.get('leads', [])
+        product = data.get('product', '')
+        
+        logging.info(f"Received email generation request for {len(leads)} leads and product: {product}")
+        
+        if not leads or not product:
+            logging.error("Missing required fields in request")
+            return jsonify({'error': 'Missing required fields'}), 400
+        
+        # Get product details from the database
+        product_details = product_database.get(product.lower())
+        if not product_details:
+            logging.error(f"Invalid product requested: {product}")
+            return jsonify({'error': 'Invalid product'}), 400
+        
+        # Convert product details to string format
+        product_details_str = json.dumps(product_details)
+        
+        # Generate emails for all leads
+        logging.info("Starting email generation process")
+        generated_emails = generate_email_for_multiple_leads(leads, product_details_str)
+        
+        # Log success/failure statistics
+        success_count = sum(1 for email in generated_emails if email.get('subject') != '[No subject generated]' and email.get('body') != '[No body generated]')
+        failure_count = len(generated_emails) - success_count
+        logging.info(f"Email generation completed. Success: {success_count}, Failed: {failure_count}, Total: {len(generated_emails)}")
+        
+        return jsonify({
+            'emails': generated_emails,
+            'stats': {
+                'total': len(generated_emails),
+                'successful': success_count,
+                'failed': failure_count
+            }
+        })
+        
+    except Exception as e:
+        logging.error(f"Error in generate-email endpoint: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/delete_lead', methods=['POST'])
+def delete_lead():
+    try:
+        data = request.get_json()
+        lead_id = data.get('lead_id')
+        user_email = get_user_email()
+        
+        if not lead_id or not user_email:
+            return jsonify({'error': 'Missing lead_id or user_email'}), 400
+            
+        from mongodb_client import delete_lead_by_id
+        success = delete_lead_by_id(lead_id, user_email)
+        
+        if success:
+            return jsonify({'message': 'Lead deleted successfully'}), 200
+        else:
+            return jsonify({'error': 'Failed to delete lead'}), 404
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/delete_email', methods=['POST'])
+def delete_email():
+    try:
+        data = request.get_json()
+        email_id = data.get('email_id')
+        user_email = get_user_email()
+        
+        if not email_id or not user_email:
+            return jsonify({'error': 'Missing email_id or user_email'}), 400
+            
+        from mongodb_client import delete_email_by_id
+        success = delete_email_by_id(email_id, user_email)
+        
+        if success:
+            return jsonify({'message': 'Email deleted successfully'}), 200
+        else:
+            return jsonify({'error': 'Failed to delete email'}), 404
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def prepare_email_payloads(generated_emails, enriched_data):
+    """Prepare email payloads for sending emails."""
+    if not generated_emails or (isinstance(enriched_data, pd.DataFrame) and enriched_data.empty):
+        return []
+        
+    payloads = []
+    for email in generated_emails:
+        try:
+            # Get lead data from enriched data
+            lead_id = email.get('lead_id')
+            lead_data = enriched_data[enriched_data['lead_id'] == lead_id]
+            
+            if lead_data.empty:
+                continue
+                
+            # Get email details
+            recipient_email = lead_data['email'].iloc[0]
+            if recipient_email == 'N/A':
+                continue
+                
+            # Get sender details
+            sender_email = email.get('from')
+            sender_name = email.get('from_name')
+            
+            # Get email content
+            final_result = email.get('final_result', {})
+            subject = final_result.get('subject', '')
+            body = final_result.get('body', '')
+            
+            if not all([recipient_email, subject, body, sender_email]):
+                continue
+                
+            # Format the email body with proper closing
+            if sender_name:
+                # Remove any existing closings
+                body = body.replace("Best regards,\n[Your Name]", "")
+                body = body.replace("Best Regards,\n[Your Name]", "")
+                body = body.replace("Best regards,", "")
+                body = body.replace("Best Regards,", "")
+                body = body.strip()
+                
+                # Add the properly formatted closing
+                body = f"{body}\n\nBest Regards,\n{sender_name}"
+            
+            # Create the payload
+            payload = {
+                "email": [recipient_email],  # API expects a list of emails
+                "subject": subject,
+                "body": body,
+                "sender_email": sender_email,
+                "sender_name": sender_name
+            }
+            
+            payloads.append(payload)
+            
+        except Exception as e:
+            print(f"Error preparing payload for email: {str(e)}")
+            continue
+            
+    return payloads
+
 def main():
     # Initialize session state for authentication
     if 'user_info' not in st.session_state:
         st.session_state.user_info = None
     if 'auth_checked' not in st.session_state:
         st.session_state.auth_checked = False
+    if 'show_signature_form' not in st.session_state:
+        st.session_state.show_signature_form = False
 
     # Check if we're in the callback
     if 'code' in st.query_params:
@@ -346,7 +469,8 @@ def main():
         "People Search",
         "People Enrichment",
         "Mail Generation",
-        "Send Emails"
+        "Send Emails",
+        "Add Signature"
     ]
     selected_tab = st.sidebar.radio("Navigation", sidebar_options)
 
@@ -354,8 +478,6 @@ def main():
     if st.session_state.get('show_user_panel', False):
         st.title("User Panel: Database Viewer")
         from mongodb_client import fetch_enriched_leads, fetch_generated_emails
-        def get_user_email():
-            return st.session_state.get("user_email") or (get_user_email() if is_authenticated() else get_outlook_email())
         user_email = get_user_email()
         st.header("Your Enriched Leads")
         enriched_df = fetch_enriched_leads(user_email)
@@ -433,13 +555,31 @@ def main():
                         company_locations=locations,
                         company_industries=industries,
                         per_page=per_page,
-                        page=1
+                        page=results_count // per_page + (1 if results_count % per_page > 0 else 0)  # Calculate required pages
                     )
                     if results and isinstance(results, list) and len(results) > 0:
                         st.session_state.search_results = results
                         st.session_state.search_completed = True
                         try:
-                            df = pd.DataFrame(results)
+                            # Convert the results to a more structured format
+                            structured_results = []
+                            for result in results:
+                                structured_result = {
+                                    'ID': result.get('id', 'N/A'),
+                                    'Name': result.get('name', 'N/A'),
+                                    'Title': result.get('title', 'N/A'),
+                                    'Email': result.get('email', 'N/A'),
+                                    'Email Status': result.get('email_status', 'N/A'),
+                                    'LinkedIn URL': result.get('linkedin_url', 'N/A'),
+                                    'Organization': result.get('organization_name', 'N/A'),
+                                    'Location': result.get('present_raw_address', 'N/A'),
+                                    'City': result.get('city', 'N/A'),
+                                    'State': result.get('state', 'N/A'),
+                                    'Country': result.get('country', 'N/A')
+                                }
+                                structured_results.append(structured_result)
+                            
+                            df = pd.DataFrame(structured_results)
                             if not df.empty:
                                 st.subheader("Search Results")
                                 st.dataframe(df, use_container_width=True)
@@ -613,7 +753,7 @@ def main():
                     enriched_df = get_people_data(lead_ids)
                     if not enriched_df.empty:
                         # Save enriched data to MongoDB for the current user
-                        user_email = get_user_email() if is_authenticated() else get_outlook_email()
+                        user_email = get_user_email()
                         from mongodb_client import save_enriched_data
                         save_enriched_data(enriched_df.to_dict('records'), user_email)
                         st.session_state["enriched_data"] = enriched_df
@@ -649,32 +789,91 @@ def main():
                     product_details = get_product_details(product.lower())
                     leads = st.session_state["enriched_data"].to_dict(orient="records")
                     logging.info(f"Generating emails for {len(leads)} leads with product: {product}")
+                    
+                    # Get user's signature
+                    user_email = get_user_email()
+                    signature = get_signature(user_email)
+                    
                     all_generated_emails = []
                     for lead in leads:
                         lead_emails = []
                         for day in sorted(intervals):
                             prompt = FOLLOWUP_PROMPTS[day]
-                            # logger.info(f"Generating email for lead {lead} on day {day} with prompt: {prompt}")
                             email = generate_email_for_single_lead_with_custom_prompt(
                                 lead_details=lead,
                                 product_details=product_details,
                                 day=day,
                                 product_name=product
                             )
+                            
+                            # Add signature if it exists
+                            if signature:
+                                body = email.get('body', '')
+                                if body.strip().endswith("Best Regards,"):
+                                    body = body.rstrip() + f"\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
+                                    email['body'] = body
+                            
                             email["interval_day"] = day
                             lead_emails.append(email)
+                            
                         all_generated_emails.append({
                             "lead_id": lead.get("id") or lead.get("lead_id"),
                             "lead_name": lead.get("name"),
                             "emails": lead_emails
                         })
+                    
+                    # Prepare email payloads
+                    payloads = []
+                    for lead_block in all_generated_emails:
+                        for email in lead_block["emails"]:
+                            try:
+                                # Get lead data from enriched data
+                                lead_id = lead_block["lead_id"]
+                                lead_data = st.session_state["enriched_data"][st.session_state["enriched_data"]['lead_id'] == lead_id]
+                                
+                                if lead_data.empty:
+                                    continue
+                                    
+                                # Get email details
+                                recipient_email = lead_data['email'].iloc[0]
+                                if recipient_email == 'N/A':
+                                    continue
+                                    
+                                # Get sender details
+                                sender_email = user_email
+                                sender_name = get_user_name() if is_authenticated() else get_outlook_name()
+                                
+                                # Get email content
+                                final_result = email.get("final_result", {})
+                                subject = final_result.get("subject", "")
+                                body = final_result.get("body", "")
+                                
+                                if not all([recipient_email, subject, body, sender_email]):
+                                    continue
+                                
+                                # Create the payload
+                                payload = {
+                                    "email": [recipient_email],  # API expects a list of emails
+                                    "subject": subject,
+                                    "body": body,
+                                    "sender_email": sender_email,
+                                    "sender_name": sender_name
+                                }
+                                
+                                payloads.append(payload)
+                                
+                            except Exception as e:
+                                print(f"Error preparing payload for email: {str(e)}")
+                                continue
+                    
                     st.session_state["generated_emails"] = all_generated_emails
+                    st.session_state["email_payloads"] = payloads
                     st.session_state["mail_generation_completed"] = True
+                    
                     # Save generated emails to MongoDB for the current user
-                    user_email = get_user_email() if is_authenticated() else get_outlook_email()
-                    from mongodb_client import save_generated_emails
                     save_generated_emails(all_generated_emails, user_email)
                     st.success("Email generation complete!")
+                    
             if st.session_state.get("generated_emails"):
                 st.subheader("Generated Emails & Follow-ups Preview")
                 email_cards_css = """
@@ -698,8 +897,6 @@ def main():
                             st.markdown(f"<div style='margin-top:10px;'><b>Body:</b></div>", unsafe_allow_html=True)
                             st.markdown(f"<div class='followup-email-body'>{email.get('body','')}</div>", unsafe_allow_html=True)
                     st.markdown("</div>", unsafe_allow_html=True)
-                # Optionally, allow download as CSV/JSON
-                # ...existing code for download if needed...
         else:
             st.info("Please complete People Enrichment first.")
 
@@ -711,7 +908,7 @@ def main():
             if enriched_data is None or enriched_data.empty:
                 # Try to fetch from MongoDB as fallback
                 from mongodb_client import fetch_enriched_leads
-                user_email = get_user_email() if is_authenticated() else get_outlook_email()
+                user_email = get_user_email()
                 enriched_data = fetch_enriched_leads(user_email)
                 if enriched_data is not None and not enriched_data.empty:
                     st.session_state["enriched_data"] = enriched_data
@@ -745,8 +942,8 @@ def main():
             # Schedule follow-ups
             if st.button("Schedule Follow-up Emails", key="schedule_followup_btn"):
                 with st.spinner("Scheduling follow-up emails..."):
-                    user_email = get_user_email() if is_authenticated() else get_outlook_email()
-                    user_name = get_user_name() if is_authenticated() else get_outlook_name()
+                    user_email = get_user_email()
+                    user_name = get_user_name()
                     for email in st.session_state["generated_emails"]:
                         lead_email = email.get("recipient_email") or email.get("email")
                         base_payload = {"lead_id": email.get("lead_id")}
@@ -770,91 +967,45 @@ def main():
         else:
             st.info("Please generate emails first.")
 
-@app.route('/api/generate-email', methods=['POST'])
-def generate_email():
-    try:
-        data = request.get_json()
-        leads = data.get('leads', [])
-        product = data.get('product', '')
+    # Add Signature page
+    elif selected_tab == "Add Signature":
+        st.title("Email Signature")
         
-        logging.info(f"Received email generation request for {len(leads)} leads and product: {product}")
-        
-        if not leads or not product:
-            logging.error("Missing required fields in request")
-            return jsonify({'error': 'Missing required fields'}), 400
-        
-        # Get product details from the database
-        product_details = product_database.get(product.lower())
-        if not product_details:
-            logging.error(f"Invalid product requested: {product}")
-            return jsonify({'error': 'Invalid product'}), 400
-        
-        # Convert product details to string format
-        product_details_str = json.dumps(product_details)
-        
-        # Generate emails for all leads
-        logging.info("Starting email generation process")
-        generated_emails = generate_email_for_multiple_leads(leads, product_details_str)
-        
-        # Log success/failure statistics
-        success_count = sum(1 for email in generated_emails if email.get('subject') != '[No subject generated]' and email.get('body') != '[No body generated]')
-        failure_count = len(generated_emails) - success_count
-        logging.info(f"Email generation completed. Success: {success_count}, Failed: {failure_count}, Total: {len(generated_emails)}")
-        
-        return jsonify({
-            'emails': generated_emails,
-            'stats': {
-                'total': len(generated_emails),
-                'successful': success_count,
-                'failed': failure_count
-            }
-        })
-        
-    except Exception as e:
-        logging.error(f"Error in generate-email endpoint: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        # Get user email
+        user_email = get_user_email()
+        if not user_email:
+            st.error("Please sign in to manage your signature.")
+            return
 
-@app.route('/delete_lead', methods=['POST'])
-def delete_lead():
-    try:
-        data = request.get_json()
-        lead_id = data.get('lead_id')
-        user_email = get_user_email() if is_authenticated() else get_outlook_email()
-        
-        if not lead_id or not user_email:
-            return jsonify({'error': 'Missing lead_id or user_email'}), 400
-            
-        from mongodb_client import delete_lead_by_id
-        success = delete_lead_by_id(lead_id, user_email)
-        
-        if success:
-            return jsonify({'message': 'Lead deleted successfully'}), 200
-        else:
-            return jsonify({'error': 'Failed to delete lead'}), 404
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        # Get existing signature if any
+        existing_signature = get_signature(user_email)
 
-@app.route('/delete_email', methods=['POST'])
-def delete_email():
-    try:
-        data = request.get_json()
-        email_id = data.get('email_id')
-        user_email = get_user_email() if is_authenticated() else get_outlook_email()
-        
-        if not email_id or not user_email:
-            return jsonify({'error': 'Missing email_id or user_email'}), 400
+        # Create form for signature
+        with st.form("signature_form"):
+            name = st.text_input("Your Name", value=existing_signature.get('name', '') if existing_signature else '')
+            company = st.text_input("Your Company", value=existing_signature.get('company', '') if existing_signature else '')
+            linkedin_url = st.text_input("Your LinkedIn Profile URL", value=existing_signature.get('linkedin_url', '') if existing_signature else '')
             
-        from mongodb_client import delete_email_by_id
-        success = delete_email_by_id(email_id, user_email)
-        
-        if success:
-            return jsonify({'message': 'Email deleted successfully'}), 200
-        else:
-            return jsonify({'error': 'Failed to delete email'}), 404
+            submitted = st.form_submit_button("Save Signature")
             
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+            if submitted:
+                if name and company and linkedin_url:
+                    if save_signature(user_email, name, company, linkedin_url):
+                        st.success("Signature saved successfully!")
+                    else:
+                        st.error("Failed to save signature. Please try again.")
+                else:
+                    st.error("Please fill in all fields.")
+
+    # Home page
+    elif selected_tab == "Home":
+        st.title("Welcome to LeadX")
+        st.write("Please use the sidebar to navigate through different features:")
+        st.write("1. People Search - Find potential leads")
+        st.write("2. People Enrichment - Get detailed information about leads")
+        st.write("3. Mail Generation - Create personalized emails")
+        st.write("4. Send Emails - Send or schedule your emails")
+        st.write("5. Add Signature - Manage your email signature")
 
 if __name__ == "__main__":
     main()

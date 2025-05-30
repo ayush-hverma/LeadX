@@ -168,7 +168,7 @@ def handle_outlook_callback(code):
         'code' in st.query_params and
         'state' in st.query_params
     ):
-        logger.info("handle_outlook_callback called outside of valid OAuth context; skipping.")
+        logger.info("[Outlook Auth] handle_outlook_callback called outside of valid OAuth context; skipping.")
         return None
     try:
         state = st.query_params['state']
@@ -177,19 +177,18 @@ def handle_outlook_callback(code):
         redirect_uri = st.secrets["OUTLOOK_REDIRECT_URI"]["value"]
         if not redirect_uri.endswith('/'):
             redirect_uri = redirect_uri + '/'
-        # Load code verifier from the state-specific file
-        code_verifier = load_code_verifier(state)
+        # Load code verifier from the file
+        code_verifier = load_code_verifier()
         if not code_verifier:
-            logger.error("Code verifier not found for state (likely due to expired or reused auth code, or multiple auth attempts in parallel). Please restart the sign-in flow.")
-            st.error("Your Outlook authentication session expired or was already used. Please sign in again from the beginning.")
-            clear_code_verifier(state)
+            logger.error("[Outlook Auth] Code verifier not found. Please restart the sign-in flow.")
+            st.error("Your Outlook authentication session expired. Please sign in again from the beginning.")
             if os.path.exists('outlook_token.pkl'):
                 os.remove('outlook_token.pkl')
             for k in ["outlook_token", "outlook_user_info", "outlook_account", "outlook_email", "outlook_auth_complete"]:
                 if k in st.session_state:
                     st.session_state[k] = None
             return None
-        logger.info(f"Retrieved code verifier for state {state}")
+        logger.info("[Outlook Auth] Retrieved code verifier successfully")
         token_url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
         token_data = {
             'client_id': client_id,
@@ -200,11 +199,10 @@ def handle_outlook_callback(code):
             'code_verifier': code_verifier,
             'scope': ' '.join(OUTLOOK_SCOPES)
         }
-        logger.info(f"Making token request to {token_url}")
+        logger.info(f"[Outlook Auth] Making token request to {token_url}")
         response = requests.post(token_url, data=token_data)
-        logger.info(f"Token response status: {response.status_code}")
-        # Always remove the code verifier after token exchange attempt
-        clear_code_verifier(state)
+        logger.info(f"[Outlook Auth] Token response status: {response.status_code}")
+        
         if response.status_code == 200:
             result = response.json()
             if "access_token" in result:
@@ -214,34 +212,35 @@ def handle_outlook_callback(code):
                 save_outlook_token(result)
                 user_info = get_outlook_user_info(result["access_token"])
                 if user_info:
-                    logger.info("Successfully authenticated with Outlook")
+                    logger.info("[Outlook Auth] Successfully authenticated with Outlook")
+                    st.session_state.outlook_auth_complete = True
+                    # Keep the code verifier file for future use
                     return user_info
                 else:
-                    logger.error("Failed to get user information")
+                    logger.error("[Outlook Auth] Failed to get user information")
                     st.error("Failed to get user information")
                     return None
             else:
-                logger.error(f"Failed to acquire token - missing access_token in response: {result}")
+                logger.error(f"[Outlook Auth] Failed to acquire token - missing access_token in response: {result}")
                 st.error(f"Failed to acquire token - missing required tokens. Response: {result}")
                 return None
         else:
-            logger.error(f"Token request failed: {response.text}")
+            logger.error(f"[Outlook Auth] Token request failed: {response.text}")
             try:
                 error_json = response.json()
                 if (
                     error_json.get("error") == "invalid_grant" and
                     "AADSTS54005" in error_json.get("error_description", "")
                 ):
-                    # Do NOT delete code verifier or token files, just clear session and prompt retry
-                    logger.info("Code was already redeemed. Prompting user to retry sign-in, but keeping auth files for next attempt.")
+                    logger.info("[Outlook Auth] Code was already redeemed. Prompting user to retry sign-in.")
                     st.error("Your authentication session expired or was already used. Please try signing in again.")
                     return None
             except Exception as parse_err:
-                logger.error(f"Error parsing token error response: {parse_err}")
+                logger.error(f"[Outlook Auth] Error parsing token error response: {parse_err}")
             st.error(f"Failed to acquire token. Response: {response.text}")
             return None
     except Exception as e:
-        logger.error(f"Outlook authentication failed: {str(e)}")
+        logger.error(f"[Outlook Auth] Outlook authentication failed: {str(e)}")
         st.error(f"Authentication failed: {str(e)}")
         return None
 
@@ -332,75 +331,70 @@ def outlook_logout():
 def save_outlook_token(token):
     """Save the Outlook token to a local file."""
     try:
-        with open('outlook_token.pkl', 'wb') as f:
+        filename = 'outlook_token.pkl'
+        with open(filename, 'wb') as f:
             pickle.dump(token, f)
-        logger.info("Saved Outlook token to outlook_token.pkl")
+        logger.info(f"[Outlook Auth] Successfully saved Outlook token to {filename}")
     except Exception as e:
-        logger.error(f"Error saving Outlook token: {str(e)}")
+        logger.error(f"[Outlook Auth] Error saving Outlook token: {str(e)}")
 
 def load_outlook_token():
     """Load the Outlook token from a local file."""
     try:
-        if os.path.exists('outlook_token.pkl'):
-            with open('outlook_token.pkl', 'rb') as f:
+        filename = 'outlook_token.pkl'
+        if os.path.exists(filename):
+            with open(filename, 'rb') as f:
                 token = pickle.load(f)
-            logger.info("Loaded Outlook token from outlook_token.pkl")
+            logger.info(f"[Outlook Auth] Successfully loaded Outlook token from {filename}")
             return token
+        logger.warning("[Outlook Auth] No Outlook token file found")
     except Exception as e:
-        logger.error(f"Error loading Outlook token: {str(e)}")
+        logger.error(f"[Outlook Auth] Error loading Outlook token: {str(e)}")
     return None
 
 def save_code_verifier(code_verifier, state=None):
     """Save the PKCE code verifier to a local file."""
     try:
-        # Create a directory for auth files in the current working directory
-        auth_dir = os.path.join(os.getcwd(), 'auth_files')
-        os.makedirs(auth_dir, exist_ok=True)
-        
-        # Ensure directory has proper permissions
-        os.chmod(auth_dir, 0o755)
-        
-        # Save the code verifier to a single file
-        filename = os.path.join(auth_dir, 'outlook_code_verifier.pkl')
+        # Save the code verifier directly in the current directory
+        filename = 'outlook_code_verifier.pkl'
         with open(filename, 'wb') as f:
             pickle.dump(code_verifier, f)
-        logger.info(f"Saved code verifier to file {filename}")
+        logger.info(f"[Outlook Auth] Successfully saved code verifier to {filename}")
         
         # Ensure file has proper permissions
         os.chmod(filename, 0o644)
         
         return True
     except Exception as e:
-        logger.error(f"Error saving code verifier: {str(e)}")
+        logger.error(f"[Outlook Auth] Error saving code verifier: {str(e)}")
         st.error(f"Failed to save authentication data: {str(e)}")
         return False
 
 def load_code_verifier(state=None):
     """Load the PKCE code verifier from a local file."""
     try:
-        auth_dir = os.path.join(os.getcwd(), 'auth_files')
-        filename = os.path.join(auth_dir, 'outlook_code_verifier.pkl')
+        filename = 'outlook_code_verifier.pkl'
         
         if os.path.exists(filename):
             with open(filename, 'rb') as f:
                 code_verifier = pickle.load(f)
-            logger.info(f"Loaded code verifier from file {filename}")
+            logger.info(f"[Outlook Auth] Successfully loaded code verifier from {filename}")
             return code_verifier
             
-        logger.warning("No code verifier file found")
+        logger.warning("[Outlook Auth] No code verifier file found")
         return None
     except Exception as e:
-        logger.error(f"Error loading code verifier: {str(e)}")
+        logger.error(f"[Outlook Auth] Error loading code verifier: {str(e)}")
         return None
 
 def clear_code_verifier(state=None):
     """Remove code verifier from local file."""
     try:
-        auth_dir = os.path.join(os.getcwd(), 'auth_files')
-        filename = os.path.join(auth_dir, 'outlook_code_verifier.pkl')
+        filename = 'outlook_code_verifier.pkl'
         
-        if os.path.exists(filename):
+        # Only clear the code verifier if authentication was successful
+        if os.path.exists(filename) and st.session_state.get('outlook_auth_complete', False):
             os.remove(filename)
-            logger.info(f"Removed code verifier file {filename}")
+            logger.info(f"[Outlook Auth] Removed code verifier file {filename}")
     except Exception as e:
-        logger.error(f"Error clearing code verifier: {str(e)}")
+        logger.error(f"[Outlook Auth] Error clearing code verifier: {str(e)}")
