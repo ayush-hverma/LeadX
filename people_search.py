@@ -3,6 +3,7 @@ import json
 import os
 import dotenv
 from typing import List, Dict, Any
+import streamlit as st
 
 dotenv.load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
@@ -32,10 +33,10 @@ def get_people_search_results(
         List of people dicts
     """
     url = "https://api.apollo.io/api/v1/mixed_people/search"
-    api_key = os.getenv("APOLLO_API_KEY")
+    api_key = st.secrets["APOLLO_API_KEY"]
 
     if not api_key:
-        print("Error: APOLLO_API_KEY not found in .env file")
+        print("Error: APOLLO_API_KEY not found in Streamlit secrets")
         return []
 
     headers = {
@@ -47,6 +48,7 @@ def get_people_search_results(
 
     all_results = []
     print(f"\nFetching results from pages 1 to {page}...")
+    print(f"Using API Key: {api_key[:5]}...{api_key[-5:]}")  # Print first and last 5 chars of API key
 
     for current_page in range(1, page + 1):
         payload = {
@@ -65,8 +67,12 @@ def get_people_search_results(
         print("\nPayload:")
         print(json.dumps(payload, indent=2))
         try:
+            print(f"\nMaking request to {url}")
+            print(f"Headers: {json.dumps(headers, indent=2)}")
             response = requests.post(url, headers=headers, json=payload)
             print(f"Apollo.io API status: {response.status_code}")
+            print(f"Response headers: {dict(response.headers)}")
+            print(f"Response text: {response.text[:1000]}")  # Print first 1000 chars of response
             response.raise_for_status()
             data = response.json()
             print(f"\nPage {current_page} - Response has {len(data.get('people', []))} people")

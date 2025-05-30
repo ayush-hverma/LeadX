@@ -146,6 +146,7 @@ def prepare_email_payloads(generated_emails: List[Dict[str, Any]], enriched_data
     outlook_auth = is_outlook_authenticated()
     
     if not (gmail_auth or outlook_auth):
+        print("[DEBUG] No authentication found for either Gmail or Outlook")
         return payloads
         
     # Get sender information based on authentication method
@@ -157,60 +158,73 @@ def prepare_email_payloads(generated_emails: List[Dict[str, Any]], enriched_data
         sender_name = get_user_name()
     
     if not sender_email:
+        print("[DEBUG] No sender email found")
         return payloads
     
     if not generated_emails:
+        print("[DEBUG] No generated emails provided")
         return payloads
         
-    for result in generated_emails:
+    for lead_block in generated_emails:
         try:
-            if not isinstance(result, dict):
-                print("[DEBUG] Skipping: generated_email is not a dict.")
+            if not isinstance(lead_block, dict):
+                print("[DEBUG] Skipping: lead_block is not a dict.")
                 continue
-            final_result = result.get("final_result", {})
-            if not final_result:
-                print(f"[DEBUG] Skipping: no final_result in {result}")
-                continue
-            lead_id = result.get("lead_id")
+                
+            lead_id = lead_block.get("lead_id")
             if not lead_id:
-                print(f"[DEBUG] Skipping: no lead_id in {result}")
+                print(f"[DEBUG] Skipping: no lead_id in lead_block")
                 continue
+                
+            # Get lead data from enriched data
             lead_data = enriched_data[enriched_data['lead_id'] == lead_id]
             if lead_data.empty:
                 print(f"[DEBUG] Skipping: no matching enriched_data for lead_id {lead_id}")
                 continue
-            email = lead_data['email'].iloc[0]
-            subject = final_result.get("subject", "")
-            body = final_result.get("body", "")
-            if not all([email, subject, body]):
-                print(f"[DEBUG] Skipping: missing email/subject/body for lead_id {lead_id}")
-                continue
-            if email == 'N/A':
-                print(f"[DEBUG] Skipping: email is 'N/A' for lead_id {lead_id}")
-                continue
-            
-            # Format the email body with proper closing
-            if sender_name:
-                # Remove any existing "Best regards" or similar closings
-                body = body.replace("Best regards,\n[Your Name]", "")
-                body = body.replace("Best Regards,\n[Your Name]", "")
-                body = body.replace("Best regards,", "")
-                body = body.replace("Best Regards,", "")
-                body = body.strip()
                 
-                # Add the properly formatted closing with the sender's name
-                body = f"{body}\n\nBest Regards,\n{sender_name}"
-            
-            payloads.append({
-                "email": [email],  # API expects a list of emails
-                "subject": subject,
-                "body": body,
-                "sender_email": sender_email,
-                "sender_name": sender_name
-            })
-            print(f"[DEBUG] Prepared payload for {email} (lead_id: {lead_id})")
+            # Process each email in the lead_block
+            emails = lead_block.get("emails", [])
+            for email in emails:
+                try:
+                    # Get email details
+                    recipient_email = email.get("recipient_email")
+                    if not recipient_email or recipient_email == "N/A":
+                        print(f"[DEBUG] Skipping: invalid recipient_email for lead_id {lead_id}")
+                        continue
+                        
+                    subject = email.get("subject", "")
+                    body = email.get("body", "")
+                    
+                    if not all([recipient_email, subject, body]):
+                        print(f"[DEBUG] Skipping: missing email/subject/body for lead_id {lead_id}")
+                        continue
+                    
+                    # Format the email body with proper closing
+                    if sender_name:
+                        # Remove any existing "Best regards" or similar closings
+                        body = body.replace("Best regards,\n[Your Name]", "")
+                        body = body.replace("Best Regards,\n[Your Name]", "")
+                        body = body.replace("Best regards,", "")
+                        body = body.replace("Best Regards,", "")
+                        body = body.strip()
+                        
+                        # Add the properly formatted closing with the sender's name
+                        body = f"{body}\n\nBest Regards,\n{sender_name}"
+                    
+                    payloads.append({
+                        "email": [recipient_email],  # API expects a list of emails
+                        "subject": subject,
+                        "body": body,
+                        "sender_email": sender_email,
+                        "sender_name": sender_name
+                    })
+                    print(f"[DEBUG] Prepared payload for {recipient_email} (lead_id: {lead_id})")
+                except Exception as e:
+                    print(f"[DEBUG] Exception while processing email in lead_block: {e}")
+                    continue
         except Exception as e:
-            print(f"[DEBUG] Exception while preparing payload: {e}")
+            print(f"[DEBUG] Exception while processing lead_block: {e}")
             continue
+            
     print(f"[DEBUG] prepare_email_payloads: returning {len(payloads)} payloads.")
     return payloads

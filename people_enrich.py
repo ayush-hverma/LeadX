@@ -3,10 +3,11 @@ import pandas as pd
 import json
 import os
 from dotenv import load_dotenv
+import streamlit as st
 
 load_dotenv()
 
-APOLLO_API_KEY = os.getenv("APOLLO_API_KEY")
+APOLLO_API_KEY = st.secrets["APOLLO_API_KEY"]
 
 def get_people_data(lead_ids: list) -> pd.DataFrame:
     """

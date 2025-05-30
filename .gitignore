@@ -60,3 +60,7 @@ outlook_code_verifier.pkl
 outlook_token.pkl
 google_token.pkl
 token.pickle
+
+emails/
+
+.devcontainer/

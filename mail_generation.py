@@ -94,6 +94,7 @@ class EmailGenerationPipeline:
         # Defensive: ensure lead is a dict and not None
         if not isinstance(lead, dict):
             lead = {}
+            
         sender_name = ''
         sender_email = ''
         # Prefer cached Outlook user info if available
@@ -127,6 +128,12 @@ class EmailGenerationPipeline:
             "company_industry": str(lead.get('company_industry', '')),
             "email": str(lead.get('email', ''))
         }
+        
+        # Ensure we have a valid email
+        if not lead_details["email"] or lead_details["email"] == "N/A":
+            print(f"❌ Invalid email for lead {lead_details['name']}")
+            return None
+            
         try:
             result = generate_email_for_single_lead(lead_details, formatted_product, product_name=product_name)
             body = result.get("body", "")
@@ -146,24 +153,14 @@ class EmailGenerationPipeline:
                     "body": body
                 },
                 "lead_id": lead_details["lead_id"],
-                "recipient": result.get("recipient", ""),
-                "recipient_email": result.get("recipient_email", ""),
+                "recipient": lead_details["name"],
+                "recipient_email": lead_details["email"],
                 "from": sender_email,
                 "from_name": sender_name  # Use full name for display
             }
         except Exception as e:
             print(f"❌ Error generating email for {lead.get('name', 'Unknown')}: {str(e)}")
-            return {
-                "final_result": {
-                    "subject": "Error generating email",
-                    "body": f"An error occurred while generating the email: {str(e)}\n\n"
-                },
-                "lead_id": lead_details.get("lead_id", ""),
-                "recipient": lead_details.get("name", ""),
-                "recipient_email": lead_details.get("email", ""),
-                "from": sender_email,
-                "from_name": sender_name
-            }
+            return None
     
     def get_timestamp(self) -> str:
         """Get current timestamp for file naming"""

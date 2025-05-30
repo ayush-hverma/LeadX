@@ -25,6 +25,8 @@ from outlook_sender import prepare_outlook_email_payloads, OutlookSender
 from outlook_auth import get_outlook_name
 from mongodb_client import save_enriched_data, save_generated_emails, collection, generated_emails_collection, lead_exists, delete_lead_by_id, delete_email_by_id, get_signature, save_signature
 import bson
+from datetime import datetime
+from bson import ObjectId
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -253,71 +255,146 @@ def delete_email():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+class MongoJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        return super().default(obj)
+
 def prepare_email_payloads(generated_emails, enriched_data):
     """Prepare email payloads for sending emails."""
     if not generated_emails or (isinstance(enriched_data, pd.DataFrame) and enriched_data.empty):
+        print("[DEBUG] No generated emails or enriched data available")
         return []
         
+    print(f"[DEBUG] Processing {len(generated_emails)} lead blocks")
     payloads = []
-    for email in generated_emails:
+    
+    for lead_block in generated_emails:
         try:
             # Get lead data from enriched data
-            lead_id = email.get('lead_id')
+            lead_id = str(lead_block.get('lead_id'))  # Convert ObjectId to string
+            if not lead_id:
+                print(f"[DEBUG] Skipping: no lead_id in lead_block")
+                continue
+                
+            print(f"[DEBUG] Processing lead_id: {lead_id}")
             lead_data = enriched_data[enriched_data['lead_id'] == lead_id]
             
             if lead_data.empty:
+                print(f"[DEBUG] Skipping: no matching enriched_data for lead_id {lead_id}")
                 continue
                 
             # Get email details
             recipient_email = lead_data['email'].iloc[0]
             if recipient_email == 'N/A':
+                print(f"[DEBUG] Skipping: email is 'N/A' for lead_id {lead_id}")
                 continue
                 
-            # Get sender details
-            sender_email = email.get('from')
-            sender_name = email.get('from_name')
+            print(f"[DEBUG] Found recipient email: {recipient_email}")
             
-            # Get email content
-            final_result = email.get('final_result', {})
-            subject = final_result.get('subject', '')
-            body = final_result.get('body', '')
+            # Process each email in the lead_block
+            emails = lead_block.get('emails', [])
+            print(f"[DEBUG] Processing {len(emails)} emails for lead {lead_id}")
             
-            if not all([recipient_email, subject, body, sender_email]):
-                continue
-                
-            # Format the email body with proper closing
-            if sender_name:
-                # Remove any existing closings
-                body = body.replace("Best regards,\n[Your Name]", "")
-                body = body.replace("Best Regards,\n[Your Name]", "")
-                body = body.replace("Best regards,", "")
-                body = body.replace("Best Regards,", "")
-                body = body.strip()
-                
-                # Add the properly formatted closing
-                body = f"{body}\n\nBest Regards,\n{sender_name}"
-            
-            # Create the payload
-            payload = {
-                "email": [recipient_email],  # API expects a list of emails
-                "subject": subject,
-                "body": body,
-                "sender_email": sender_email,
-                "sender_name": sender_name
-            }
-            
-            payloads.append(payload)
-            
+            for email in emails:
+                try:
+                    # Get sender details
+                    sender_email = get_user_email()
+                    sender_name = get_user_name() if is_authenticated() else get_outlook_name()
+                    
+                    print(f"[DEBUG] Sender details - Email: {sender_email}, Name: {sender_name}")
+                    
+                    # Get email content
+                    final_result = email.get('final_result', {})
+                    subject = final_result.get('subject', '')
+                    body = final_result.get('body', '')
+                    
+                    print(f"[DEBUG] Email content - Subject: {subject}")
+                    
+                    if not all([recipient_email, subject, body, sender_email]):
+                        print(f"[DEBUG] Skipping: missing required fields for lead_id {lead_id}")
+                        print(f"[DEBUG] Fields - recipient_email: {bool(recipient_email)}, subject: {bool(subject)}, body: {bool(body)}, sender_email: {bool(sender_email)}")
+                        continue
+                    
+                    # Format the email body with proper closing
+                    if sender_name:
+                        # Remove any existing closings
+                        body = body.replace("Best regards,\n[Your Name]", "")
+                        body = body.replace("Best Regards,\n[Your Name]", "")
+                        body = body.replace("Best regards,", "")
+                        body = body.replace("Best Regards,", "")
+                        body = body.strip()
+                        
+                        # Add the properly formatted closing
+                        body = f"{body}\n\nBest Regards,\n{sender_name}"
+                    
+                    # Create the payload
+                    payload = {
+                        "email": [recipient_email],  # API expects a list of emails
+                        "subject": subject,
+                        "body": body,
+                        "sender_email": sender_email,
+                        "sender_name": sender_name
+                    }
+                    
+                    payloads.append(payload)
+                    print(f"[DEBUG] Successfully prepared payload for {recipient_email}")
+                    
+                except Exception as e:
+                    print(f"[DEBUG] Error processing email in lead_block: {str(e)}")
+                    continue
+                    
         except Exception as e:
-            print(f"Error preparing payload for email: {str(e)}")
+            print(f"[DEBUG] Error processing lead_block: {str(e)}")
             continue
             
+    print(f"[DEBUG] Total payloads prepared: {len(payloads)}")
     return payloads
+
+def save_generated_emails_locally(emails, user_email):
+    """Save generated emails to a local JSON file."""
+    try:
+        # Create emails directory if it doesn't exist
+        if not os.path.exists('emails'):
+            os.makedirs('emails')
+            
+        # Create a filename based on user email and timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"emails/{user_email.replace('@', '_at_')}_{timestamp}.json"
+        
+        # Save emails to file
+        with open(filename, 'w') as f:
+            json.dump(emails, f, indent=2)
+            
+        return filename
+    except Exception as e:
+        print(f"Error saving emails locally: {str(e)}")
+        return None
+
+def load_latest_generated_emails(user_email):
+    """Load the most recent generated emails for a user."""
+    try:
+        # Get all email files for this user
+        email_files = [f for f in os.listdir('emails') if f.startswith(user_email.replace('@', '_at_'))]
+        
+        if not email_files:
+            return None
+            
+        # Sort by timestamp (newest first) and get the most recent
+        latest_file = sorted(email_files)[-1]
+        
+        # Load the emails
+        with open(f'emails/{latest_file}', 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading emails: {str(e)}")
+        return None
 
 def main():
     # Initialize session state for authentication
     if 'user_info' not in st.session_state:
-        st.session_state.user_info = None
+        st.session_state['user_info'] = None
     if 'auth_checked' not in st.session_state:
         st.session_state.auth_checked = False
     if 'show_signature_form' not in st.session_state:
@@ -373,7 +450,7 @@ def main():
     outlook_token = load_outlook_token()
     google_token = load_google_token()
     outlook_ok = is_outlook_authenticated() and outlook_token is not None and 'access_token' in outlook_token
-    google_ok = is_authenticated() and google_token is not None
+    google_ok = is_authenticated() and google_token is not None and st.session_state.get('user_info') is not None
 
     if not (google_ok or outlook_ok) or st.session_state.get("force_sign_in", False):
         st.session_state["force_sign_in"] = False
@@ -387,12 +464,16 @@ def main():
     st.title("LeadX- Discover, Enrich, Engage")
     from outlook_auth import get_outlook_name
     from auth import get_user_name, is_authenticated
-    if is_authenticated():
+    if is_authenticated() and st.session_state.get('user_info'):
         name = get_user_name()
         st.write(f"Welcome, {name if name else 'Google User'}")
-    else:
+    elif is_outlook_authenticated():
         name = get_outlook_name()
         st.write(f"Welcome, {name if name else 'Outlook User'}")
+    else:
+        st.error("Authentication error. Please sign in again.")
+        st.session_state["force_sign_in"] = True
+        st.rerun()
 
     # Sidebar: Show user info, my account, and logout button
     with st.sidebar:
@@ -822,6 +903,18 @@ def main():
                             "emails": lead_emails
                         })
                     
+                    # Save generated emails both locally and to MongoDB
+                    filename = save_generated_emails_locally(all_generated_emails, user_email)
+                    if filename:
+                        st.success(f"Emails saved locally to {filename}")
+                    
+                    # Save to MongoDB as well
+                    save_generated_emails(all_generated_emails, user_email)
+                    st.success("Emails saved to database")
+                    
+                    st.session_state["generated_emails"] = all_generated_emails
+                    st.session_state["mail_generation_completed"] = True
+                    
                     # Prepare email payloads
                     payloads = []
                     for lead_block in all_generated_emails:
@@ -866,14 +959,9 @@ def main():
                                 print(f"Error preparing payload for email: {str(e)}")
                                 continue
                     
-                    st.session_state["generated_emails"] = all_generated_emails
                     st.session_state["email_payloads"] = payloads
-                    st.session_state["mail_generation_completed"] = True
-                    
-                    # Save generated emails to MongoDB for the current user
-                    save_generated_emails(all_generated_emails, user_email)
                     st.success("Email generation complete!")
-                    
+
             if st.session_state.get("generated_emails"):
                 st.subheader("Generated Emails & Follow-ups Preview")
                 email_cards_css = """
@@ -903,6 +991,7 @@ def main():
     elif selected_tab == "Send Emails":
         st.title("Send Emails")
         st.write("Send your generated emails in batches or schedule follow-ups.")
+        
         if st.session_state.get("generated_emails"):
             enriched_data = st.session_state.get("enriched_data")
             if enriched_data is None or enriched_data.empty:
@@ -915,57 +1004,111 @@ def main():
                     st.info("Enriched data loaded from database.")
                 else:
                     st.warning("No enriched data found. Please complete enrichment before sending emails.")
-            payloads = prepare_email_payloads(st.session_state["generated_emails"], enriched_data)
+                    return
+            
+            # Print debug info to terminal
+            print("\n[DEBUG] === Email Sending Debug Info ===")
+            print(f"Number of generated emails: {len(st.session_state['generated_emails'])}")
+            print(f"Number of enriched leads: {len(enriched_data)}")
+            print("Generated emails structure:")
+            if st.session_state['generated_emails']:
+                # Convert ObjectId to string before JSON serialization
+                sample_email = st.session_state['generated_emails'][0]
+                if isinstance(sample_email.get('lead_id'), ObjectId):
+                    sample_email['lead_id'] = str(sample_email['lead_id'])
+                print(json.dumps(sample_email, indent=2, cls=MongoJSONEncoder))
+            else:
+                print("No emails")
+            print("Enriched data columns:")
+            print(enriched_data.columns.tolist())
+            print("=====================================\n")
+            
+            # Prepare email payloads
+            payloads = []
+            for lead_block in st.session_state["generated_emails"]:
+                try:
+                    # Get lead data from enriched data
+                    lead_id = lead_block["lead_id"]
+                    lead_data = st.session_state["enriched_data"][st.session_state["enriched_data"]['lead_id'] == lead_id]
+                    
+                    if lead_data.empty:
+                        print(f"[DEBUG] Skipping: no matching enriched_data for lead_id {lead_id}")
+                        continue
+                        
+                    # Process each email in the lead_block
+                    emails = lead_block.get("emails", [])
+                    for email in emails:
+                        try:
+                            # Get email details
+                            recipient_email = email.get("recipient_email")
+                            if not recipient_email or recipient_email == "N/A":
+                                print(f"[DEBUG] Skipping: invalid recipient_email for lead_id {lead_id}")
+                                continue
+                                
+                            subject = email.get("subject", "")
+                            body = email.get("body", "")
+                            
+                            if not all([recipient_email, subject, body]):
+                                print(f"[DEBUG] Skipping: missing email/subject/body for lead_id {lead_id}")
+                                continue
+                                
+                            # Get sender details
+                            sender_email = get_user_email()
+                            sender_name = get_user_name() if is_authenticated() else get_outlook_name()
+                            
+                            # Format the email body with proper closing
+                            if sender_name:
+                                # Remove any existing "Best regards" or similar closings
+                                body = body.replace("Best regards,\n[Your Name]", "")
+                                body = body.replace("Best Regards,\n[Your Name]", "")
+                                body = body.replace("Best regards,", "")
+                                body = body.replace("Best Regards,", "")
+                                body = body.strip()
+                                
+                                # Add the properly formatted closing with the sender's name
+                                body = f"{body}\n\nBest Regards,\n{sender_name}"
+                            
+                            # Create the payload
+                            payload = {
+                                "email": [recipient_email],  # API expects a list of emails
+                                "subject": subject,
+                                "body": body,
+                                "sender_email": sender_email,
+                                "sender_name": sender_name
+                            }
+                            
+                            payloads.append(payload)
+                            print(f"[DEBUG] Successfully prepared payload for {recipient_email}")
+                            
+                        except Exception as e:
+                            print(f"[DEBUG] Error processing email in lead_block: {str(e)}")
+                            continue
+                            
+                except Exception as e:
+                    print(f"[DEBUG] Error processing lead_block: {str(e)}")
+                    continue
+            
+            if len(payloads) == 0:
+                st.error("No valid email payloads could be prepared. Please check your generated emails and enriched data.")
+                return
+            
             if st.button("Send Emails Now", key="send_emails_btn"):
                 with st.spinner("Sending emails, please wait..."):
-                    sender = EmailSender()
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    result = loop.run_until_complete(sender.send_emails(payloads))
+                    # Choose sender based on authentication
+                    if is_outlook_authenticated():
+                        sender = OutlookSender()
+                        result = sender.send_email_batch(payloads)
+                    else:
+                        sender = EmailSender()
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        result = loop.run_until_complete(sender.send_emails(payloads))
+                    
                     st.session_state["email_sending_completed"] = True
                     st.session_state["email_sending_results"] = result
                     st.success(f"Emails sent! Successful: {result.get('successful', 0)}, Failed: {result.get('failed', 0)}")
-            # --- Scheduled Email Worker UI ---
-            st.subheader("Schedule Follow-up Emails")
-            from mongodb_client import schedule_followup_emails
-            from datetime import datetime, timedelta
-            # User can pick intervals for follow-ups
-            intervals = st.multiselect(
-                "Select follow-up intervals (days after initial email)",
-                options=[0, 3, 8, 17, 24, 30],
-                default=[0, 3, 8, 17, ]
-            )
-            # Pick initial send time
-            initial_time = st.date_input("Initial send date", value=datetime.now().date())
-            initial_hour = st.number_input("Hour (24h)", min_value=0, max_value=23, value=9)
-            initial_minute = st.number_input("Minute", min_value=0, max_value=59, value=0)
-            # Schedule follow-ups
-            if st.button("Schedule Follow-up Emails", key="schedule_followup_btn"):
-                with st.spinner("Scheduling follow-up emails..."):
-                    user_email = get_user_email()
-                    user_name = get_user_name()
-                    for email in st.session_state["generated_emails"]:
-                        lead_email = email.get("recipient_email") or email.get("email")
-                        base_payload = {"lead_id": email.get("lead_id")}
-                        # Use current time for initial send, then add intervals
-                        send_time = datetime.combine(initial_time, datetime.min.time()) + timedelta(hours=initial_hour, minutes=initial_minute)
-                        prompts_by_day = {i: "" for i in intervals}  # You can customize prompts if needed
-                        schedule_followup_emails(
-                            lead_email=lead_email,
-                            sender_email=user_email,
-                            sender_name=user_name,
-                            initial_time=send_time,
-                            base_payload=base_payload,
-                            prompts_by_day=prompts_by_day,
-                            intervals=intervals
-                        )
-                    st.success("Follow-up emails scheduled! The background worker will send them automatically.")
-            elif st.session_state.get("email_sending_results"):
-                result = st.session_state["email_sending_results"]
-                st.success(f"Emails sent! Successful: {result.get('successful', 0)}, Failed: {result.get('failed', 0)}")
-            logger.info(f"Email sending results: {st.session_state.get('email_sending_results', {})}") 
         else:
-            st.info("Please generate emails first.")
+            st.warning("No generated emails found. Please generate emails first.")
 
     # Add Signature page
     elif selected_tab == "Add Signature":

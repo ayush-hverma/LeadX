@@ -45,6 +45,10 @@ def init_auth():
         st.session_state.credentials = None
     if 'gmail_service' not in st.session_state:
         st.session_state.gmail_service = None
+    if 'auth_checked' not in st.session_state:
+        st.session_state.auth_checked = False
+    if 'force_sign_in' not in st.session_state:
+        st.session_state.force_sign_in = False
 
 
 def load_credentials():
@@ -216,11 +220,13 @@ def get_user_info(credentials):
 def is_authenticated():
     """Check if user is authenticated with valid Gmail service."""
     try:
-        if not st.session_state.user_info:
+        if not st.session_state.get('user_info'):
+            logger.info("No user info in session state")
             return False
             
         # Check if we have valid credentials
-        if not st.session_state.credentials:
+        if not st.session_state.get('credentials'):
+            logger.info("No credentials in session state")
             return False
             
         # Check if credentials need refresh
@@ -228,13 +234,18 @@ def is_authenticated():
             try:
                 st.session_state.credentials.refresh(Request())
                 save_credentials(st.session_state.credentials)
-            except RefreshError:
+                save_google_token(st.session_state.credentials)
+            except RefreshError as e:
+                logger.error(f"Failed to refresh credentials: {str(e)}")
                 return False
                 
         # Check if Gmail service is initialized
-        if not st.session_state.gmail_service:
-            gmail_service = get_gmail_service()
-            if not gmail_service:
+        if not st.session_state.get('gmail_service'):
+            try:
+                gmail_service = build('gmail', 'v1', credentials=st.session_state.credentials)
+                st.session_state.gmail_service = gmail_service
+            except Exception as e:
+                logger.error(f"Failed to initialize Gmail service: {str(e)}")
                 return False
                 
         return True
