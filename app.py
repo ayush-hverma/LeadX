@@ -91,10 +91,10 @@ def get_user_info(access_token):
 
 def get_user_email():
     """Get the email of the currently authenticated user."""
-    if is_authenticated():
-        return st.session_state.get('user_email')
-    elif is_outlook_authenticated():
+    if is_outlook_authenticated():
         return get_outlook_email()
+    elif is_authenticated():
+        return st.session_state.get('user_email')
     return None
 
 def handle_auth_flow():
@@ -263,58 +263,58 @@ class MongoJSONEncoder(json.JSONEncoder):
 
 def prepare_email_payloads(generated_emails, enriched_data):
     """Prepare email payloads for sending emails."""
-    if not generated_emails or (isinstance(enriched_data, pd.DataFrame) and enriched_data.empty):
-        print("[DEBUG] No generated emails or enriched data available")
-        return []
-        
-    print(f"[DEBUG] Processing {len(generated_emails)} lead blocks")
     payloads = []
+    
+    # Check authentication
+    if not is_outlook_authenticated() and not is_authenticated():
+        print("[DEBUG] No authentication found")
+        return payloads
+        
+    # Get sender information based on authentication method
+    if is_outlook_authenticated():
+        sender_email = get_outlook_email()
+        sender_name = get_outlook_name()
+    else:
+        sender_email = get_user_email()
+        sender_name = get_user_name()
+    
+    if not sender_email:
+        print("[DEBUG] No sender email found")
+        return payloads
+    
+    if not generated_emails:
+        print("[DEBUG] No generated emails provided")
+        return payloads
+        
+    if enriched_data is None:
+        print("[DEBUG] No enriched data provided")
+        return payloads
     
     for lead_block in generated_emails:
         try:
             # Get lead data from enriched data
-            lead_id = str(lead_block.get('lead_id'))  # Convert ObjectId to string
+            lead_id = lead_block.get("lead_id")
             if not lead_id:
-                print(f"[DEBUG] Skipping: no lead_id in lead_block")
+                print("[DEBUG] No lead_id found in email data")
                 continue
                 
-            print(f"[DEBUG] Processing lead_id: {lead_id}")
             lead_data = enriched_data[enriched_data['lead_id'] == lead_id]
-            
             if lead_data.empty:
-                print(f"[DEBUG] Skipping: no matching enriched_data for lead_id {lead_id}")
+                print(f"[DEBUG] No matching lead data found for lead_id {lead_id}")
                 continue
                 
-            # Get email details
             recipient_email = lead_data['email'].iloc[0]
-            if recipient_email == 'N/A':
-                print(f"[DEBUG] Skipping: email is 'N/A' for lead_id {lead_id}")
-                continue
-                
-            print(f"[DEBUG] Found recipient email: {recipient_email}")
             
             # Process each email in the lead_block
-            emails = lead_block.get('emails', [])
-            print(f"[DEBUG] Processing {len(emails)} emails for lead {lead_id}")
-            
+            emails = lead_block.get("emails", [])
             for email in emails:
                 try:
-                    # Get sender details
-                    sender_email = get_user_email()
-                    sender_name = get_user_name() if is_authenticated() else get_outlook_name()
-                    
-                    print(f"[DEBUG] Sender details - Email: {sender_email}, Name: {sender_name}")
-                    
                     # Get email content
-                    final_result = email.get('final_result', {})
-                    subject = final_result.get('subject', '')
-                    body = final_result.get('body', '')
+                    subject = email.get("subject", "")
+                    body = email.get("body", "")
                     
-                    print(f"[DEBUG] Email content - Subject: {subject}")
-                    
-                    if not all([recipient_email, subject, body, sender_email]):
+                    if not all([recipient_email, subject, body]):
                         print(f"[DEBUG] Skipping: missing required fields for lead_id {lead_id}")
-                        print(f"[DEBUG] Fields - recipient_email: {bool(recipient_email)}, subject: {bool(subject)}, body: {bool(body)}, sender_email: {bool(sender_email)}")
                         continue
                     
                     # Format the email body with proper closing
@@ -329,17 +329,15 @@ def prepare_email_payloads(generated_emails, enriched_data):
                         # Add the properly formatted closing
                         body = f"{body}\n\nBest Regards,\n{sender_name}"
                     
-                    # Create the payload
+                    # Create payload for Outlook
                     payload = {
-                        "email": [recipient_email],  # API expects a list of emails
+                        "email": [recipient_email],
                         "subject": subject,
-                        "body": body,
-                        "sender_email": sender_email,
-                        "sender_name": sender_name
+                        "body": body
                     }
                     
                     payloads.append(payload)
-                    print(f"[DEBUG] Successfully prepared payload for {recipient_email}")
+                    print(f"[DEBUG] Successfully added payload for {recipient_email}")
                     
                 except Exception as e:
                     print(f"[DEBUG] Error processing email in lead_block: {str(e)}")
@@ -348,7 +346,7 @@ def prepare_email_payloads(generated_emails, enriched_data):
         except Exception as e:
             print(f"[DEBUG] Error processing lead_block: {str(e)}")
             continue
-            
+    
     print(f"[DEBUG] Total payloads prepared: {len(payloads)}")
     return payloads
 
@@ -530,6 +528,8 @@ def main():
         st.session_state.email_sending_completed = False
     if 'email_sending_results' not in st.session_state:
         st.session_state.email_sending_results = None
+    if 'selected_leads' not in st.session_state:
+        st.session_state.selected_leads = set()
 
     # Product list
     PRODUCTS = [
@@ -639,15 +639,20 @@ def main():
                         page=results_count // per_page + (1 if results_count % per_page > 0 else 0)  # Calculate required pages
                     )
                     if results and isinstance(results, list) and len(results) > 0:
+                        print("\n[DEBUG] Search Results Structure:")
+                        print(f"Number of results: {len(results)}")
+                        print(f"First result structure: {json.dumps(results[0], indent=2)}")
+                        
                         st.session_state.search_results = results
                         st.session_state.search_completed = True
                         try:
                             # Convert the results to a more structured format
                             structured_results = []
                             for result in results:
+                                # Handle both direct fields and nested fields
                                 structured_result = {
                                     'ID': result.get('id', 'N/A'),
-                                    'Name': result.get('name', 'N/A'),
+                                    'Name': f"{result.get('first_name', '')} {result.get('last_name', '')}".strip() or 'N/A',
                                     'Title': result.get('title', 'N/A'),
                                     'Email': result.get('email', 'N/A'),
                                     'Email Status': result.get('email_status', 'N/A'),
@@ -696,7 +701,7 @@ def main():
                     "q_organization_domains_list": [org_domain] if org_domain else [],
                     "q_organization_names_list": [org_name] if org_name else [],
                     "page": 1,
-                    "per_page": 10
+                    "per_page": 1
                 }
                 apollo_org_url = "https://api.apollo.io/api/v1/mixed_companies/search"
                 headers = {
@@ -788,7 +793,8 @@ def main():
                         print(f"[PEOPLE SEARCH] Response: {people_resp.text}")
                         people_resp.raise_for_status()
                         people_data = people_resp.json()
-                        people = people_data.get("people", [])
+                        # Handle both 'contacts' and 'people' arrays
+                        people = people_data.get('people', []) or people_data.get('contacts', [])
                         if not people:
                             break
                         all_people.extend(people)
@@ -828,9 +834,45 @@ def main():
         st.write("Enrich your people search results with additional data.")
         # Only allow enrichment if search results exist
         if st.session_state.get("search_results"):
-            lead_ids = [lead.get("id") or lead.get("lead_id") for lead in st.session_state["search_results"] if lead.get("id") or lead.get("lead_id")]
+            # Create a DataFrame from search results for selection
+            search_df = pd.DataFrame(st.session_state["search_results"])
+            
+            # Extract lead IDs correctly from search results
+            lead_ids = []
+            for lead in st.session_state["search_results"]:
+                # Handle both direct ID and nested ID in organization
+                lead_id = None
+                
+                # Try to get ID from different possible locations
+                if isinstance(lead, dict):
+                    # Direct ID
+                    lead_id = lead.get('id')
+                    
+                    # If no direct ID, try organization ID
+                    if not lead_id and 'organization' in lead:
+                        lead_id = lead.get('organization', {}).get('id')
+                    
+                    # If still no ID, try organization_id field
+                    if not lead_id:
+                        lead_id = lead.get('organization_id')
+                    
+                    # If still no ID, try ID field
+                    if not lead_id:
+                        lead_id = lead.get('ID')
+                
+                if lead_id:
+                    lead_ids.append(str(lead_id))
+                    print(f"Found lead ID: {lead_id} from lead data: {lead}")
+                else:
+                    print(f"No valid ID found in lead data: {lead}")
+            
+            if not lead_ids:
+                st.warning("No valid lead IDs found in search results.")
+                return
+                
             if st.button("Enrich People Data", key="enrich_btn"):
                 with st.spinner("Enriching data, please wait..."):
+                    print(f"Attempting to enrich {len(lead_ids)} leads with IDs: {lead_ids}")
                     enriched_df = get_people_data(lead_ids)
                     if not enriched_df.empty:
                         # Save enriched data to MongoDB for the current user
@@ -840,15 +882,24 @@ def main():
                         st.session_state["enriched_data"] = enriched_df
                         st.session_state["enrichment_completed"] = True
                         st.success("Enrichment complete!")
+                        
+                        # Display enriched data
+                        st.subheader("Enriched Data")
                         st.dataframe(enriched_df, use_container_width=True)
+                        
+                        # Add download button
                         csv = enriched_df.to_csv(index=False)
                         st.download_button("Download Enriched Data as CSV", csv, "enriched_people.csv", "text/csv")
                     else:
                         st.warning("No enrichment data found.")
             # Show previously enriched data if available
             elif st.session_state.get("enriched_data") is not None:
-                st.dataframe(st.session_state["enriched_data"], use_container_width=True)
-                csv = st.session_state["enriched_data"].to_csv(index=False)
+                enriched_df = st.session_state["enriched_data"]
+                st.subheader("Enriched Data")
+                st.dataframe(enriched_df, use_container_width=True)
+                
+                # Add download button
+                csv = enriched_df.to_csv(index=False)
                 st.download_button("Download Enriched Data as CSV", csv, "enriched_people.csv", "text/csv")
         else:
             st.info("Please complete a People Search first.")
@@ -864,19 +915,24 @@ def main():
                 options=[0, 3, 8, 17, 24, 30],
                 default=[0, 3, 8, 17]
             )
-            if st.button("Generate Emails", key="generate_emails_btn"):
+            
+            if st.button("Generate Emails"):
                 with st.spinner("Generating emails, please wait..."):
                     from personalised_email import FOLLOWUP_PROMPTS, generate_email_for_single_lead_with_custom_prompt
                     product_details = get_product_details(product.lower())
-                    leads = st.session_state["enriched_data"].to_dict(orient="records")
-                    logging.info(f"Generating emails for {len(leads)} leads with product: {product}")
+                    
+                    # Get all enriched leads
+                    enriched_df = st.session_state["enriched_data"]
+                    all_leads = enriched_df.to_dict(orient="records")
+                    
+                    logging.info(f"Generating emails for {len(all_leads)} leads with product: {product}")
                     
                     # Get user's signature
                     user_email = get_user_email()
                     signature = get_signature(user_email)
                     
                     all_generated_emails = []
-                    for lead in leads:
+                    for lead in all_leads:
                         lead_emails = []
                         for day in sorted(intervals):
                             prompt = FOLLOWUP_PROMPTS[day]
@@ -914,53 +970,6 @@ def main():
                     
                     st.session_state["generated_emails"] = all_generated_emails
                     st.session_state["mail_generation_completed"] = True
-                    
-                    # Prepare email payloads
-                    payloads = []
-                    for lead_block in all_generated_emails:
-                        for email in lead_block["emails"]:
-                            try:
-                                # Get lead data from enriched data
-                                lead_id = lead_block["lead_id"]
-                                lead_data = st.session_state["enriched_data"][st.session_state["enriched_data"]['lead_id'] == lead_id]
-                                
-                                if lead_data.empty:
-                                    continue
-                                    
-                                # Get email details
-                                recipient_email = lead_data['email'].iloc[0]
-                                if recipient_email == 'N/A':
-                                    continue
-                                    
-                                # Get sender details
-                                sender_email = user_email
-                                sender_name = get_user_name() if is_authenticated() else get_outlook_name()
-                                
-                                # Get email content
-                                final_result = email.get("final_result", {})
-                                subject = final_result.get("subject", "")
-                                body = final_result.get("body", "")
-                                
-                                if not all([recipient_email, subject, body, sender_email]):
-                                    continue
-                                
-                                # Create the payload
-                                payload = {
-                                    "email": [recipient_email],  # API expects a list of emails
-                                    "subject": subject,
-                                    "body": body,
-                                    "sender_email": sender_email,
-                                    "sender_name": sender_name
-                                }
-                                
-                                payloads.append(payload)
-                                
-                            except Exception as e:
-                                print(f"Error preparing payload for email: {str(e)}")
-                                continue
-                    
-                    st.session_state["email_payloads"] = payloads
-                    st.success("Email generation complete!")
 
             if st.session_state.get("generated_emails"):
                 st.subheader("Generated Emails & Follow-ups Preview")
@@ -1010,7 +1019,7 @@ def main():
             print("\n[DEBUG] === Email Sending Debug Info ===")
             print(f"Number of generated emails: {len(st.session_state['generated_emails'])}")
             print(f"Number of enriched leads: {len(enriched_data)}")
-            print("Generated emails structure:")
+            #print("Generated emails structure:")
             if st.session_state['generated_emails']:
                 # Convert ObjectId to string before JSON serialization
                 sample_email = st.session_state['generated_emails'][0]
@@ -1023,92 +1032,172 @@ def main():
             print(enriched_data.columns.tolist())
             print("=====================================\n")
             
-            # Prepare email payloads
-            payloads = []
-            for lead_block in st.session_state["generated_emails"]:
-                try:
-                    # Get lead data from enriched data
-                    lead_id = lead_block["lead_id"]
-                    lead_data = st.session_state["enriched_data"][st.session_state["enriched_data"]['lead_id'] == lead_id]
-                    
-                    if lead_data.empty:
-                        print(f"[DEBUG] Skipping: no matching enriched_data for lead_id {lead_id}")
-                        continue
-                        
-                    # Process each email in the lead_block
-                    emails = lead_block.get("emails", [])
-                    for email in emails:
-                        try:
-                            # Get email details
-                            recipient_email = email.get("recipient_email")
-                            if not recipient_email or recipient_email == "N/A":
-                                print(f"[DEBUG] Skipping: invalid recipient_email for lead_id {lead_id}")
-                                continue
-                                
-                            subject = email.get("subject", "")
-                            body = email.get("body", "")
-                            
-                            if not all([recipient_email, subject, body]):
-                                print(f"[DEBUG] Skipping: missing email/subject/body for lead_id {lead_id}")
-                                continue
-                                
-                            # Get sender details
-                            sender_email = get_user_email()
-                            sender_name = get_user_name() if is_authenticated() else get_outlook_name()
-                            
-                            # Format the email body with proper closing
-                            if sender_name:
-                                # Remove any existing "Best regards" or similar closings
-                                body = body.replace("Best regards,\n[Your Name]", "")
-                                body = body.replace("Best Regards,\n[Your Name]", "")
-                                body = body.replace("Best regards,", "")
-                                body = body.replace("Best Regards,", "")
-                                body = body.strip()
-                                
-                                # Add the properly formatted closing with the sender's name
-                                body = f"{body}\n\nBest Regards,\n{sender_name}"
-                            
-                            # Create the payload
-                            payload = {
-                                "email": [recipient_email],  # API expects a list of emails
-                                "subject": subject,
-                                "body": body,
-                                "sender_email": sender_email,
-                                "sender_name": sender_name
-                            }
-                            
-                            payloads.append(payload)
-                            print(f"[DEBUG] Successfully prepared payload for {recipient_email}")
-                            
-                        except Exception as e:
-                            print(f"[DEBUG] Error processing email in lead_block: {str(e)}")
-                            continue
-                            
-                except Exception as e:
-                    print(f"[DEBUG] Error processing lead_block: {str(e)}")
-                    continue
-            
-            if len(payloads) == 0:
-                st.error("No valid email payloads could be prepared. Please check your generated emails and enriched data.")
-                return
-            
             if st.button("Send Emails Now", key="send_emails_btn"):
                 with st.spinner("Sending emails, please wait..."):
-                    # Choose sender based on authentication
-                    if is_outlook_authenticated():
-                        sender = OutlookSender()
-                        result = sender.send_email_batch(payloads)
-                    else:
-                        sender = EmailSender()
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        result = loop.run_until_complete(sender.send_emails(payloads))
+                    # Initialize variables
+                    immediate_payloads = []
+                    followup_payloads = []
+                    successful = 0
+                    failed = 0
                     
-                    st.session_state["email_sending_completed"] = True
-                    st.session_state["email_sending_results"] = result
-                    st.success(f"Emails sent! Successful: {result.get('successful', 0)}, Failed: {result.get('failed', 0)}")
-        else:
-            st.warning("No generated emails found. Please generate emails first.")
+                    # Get sender details first
+                    if is_outlook_authenticated():
+                        from outlook_sender import OutlookSender
+                        sender = OutlookSender()
+                        sender_email = get_outlook_email()
+                        sender_name = get_outlook_name()
+                    else:
+                        from email_sender import EmailSender
+                        sender = EmailSender()
+                        sender_email = get_user_email()
+                        sender_name = get_user_name()
+                    
+                    if not sender_email or not sender_name:
+                        st.error("Could not get sender information. Please try logging in again.")
+                        return
+                    
+                    # Get current time for scheduling
+                    current_time = datetime.now()
+                    
+                    # Process each lead block
+                    for lead_block in st.session_state["generated_emails"]:
+                        try:
+                            # Get lead data from enriched data
+                            lead_id = lead_block.get("lead_id")
+                            if not lead_id:
+                                print("[DEBUG] No lead_id found in email data")
+                                continue
+                                
+                            lead_data = st.session_state["enriched_data"][st.session_state["enriched_data"]['lead_id'] == lead_id]
+                            if lead_data.empty:
+                                print(f"[DEBUG] No matching lead data found for lead_id {lead_id}")
+                                continue
+                                
+                            recipient_email = lead_data['email'].iloc[0]
+                            
+                            # Process each email in the lead_block
+                            emails = lead_block.get("emails", [])
+                            for email in emails:
+                                try:
+                                    # Get email content
+                                    subject = email.get("subject", "")
+                                    body = email.get("body", "")
+                                    interval_day = email.get("interval_day", 0)
+                                    
+                                    if not all([recipient_email, subject, body]):
+                                        print(f"[DEBUG] Skipping: missing required fields for lead_id {lead_id}")
+                                        continue
+                                    
+                                    # Format the email body with proper closing
+                                    if sender_name:
+                                        # Remove any existing closings
+                                        body = body.replace("Best regards,\n[Your Name]", "")
+                                        body = body.replace("Best Regards,\n[Your Name]", "")
+                                        body = body.replace("Best regards,", "")
+                                        body = body.replace("Best Regards,", "")
+                                        body = body.strip()
+                                        
+                                        # Add the properly formatted closing
+                                        body = f"{body}\n\nBest Regards,\n{sender_name}"
+                                    
+                                    # Create payload
+                                    payload = {
+                                        "email": [recipient_email],
+                                        "subject": subject,
+                                        "body": body,
+                                        "interval_day": interval_day
+                                    }
+                                    
+                                    # Separate immediate and follow-up emails
+                                    if interval_day == 0:
+                                        immediate_payloads.append(payload)
+                                    else:
+                                        followup_payloads.append(payload)
+                                    
+                                    print(f"[DEBUG] Successfully prepared payload for {recipient_email} (day {interval_day})")
+                                    
+                                except Exception as e:
+                                    print(f"[DEBUG] Error processing email in lead_block: {str(e)}")
+                                    continue
+                                    
+                        except Exception as e:
+                            print(f"[DEBUG] Error processing lead_block: {str(e)}")
+                            continue
+                    
+                    # Check if we have any emails to send
+                    if not immediate_payloads and not followup_payloads:
+                        st.error("No valid email payloads to send")
+                        return
+                    
+                    # Send immediate emails (day 0)
+                    if immediate_payloads:
+                        print(f"[DEBUG] Sending {len(immediate_payloads)} immediate emails")
+                        if isinstance(sender, OutlookSender):
+                            results = sender.send_email_batch(immediate_payloads)
+                        else:
+                            import asyncio
+                            results = asyncio.run(sender.send_emails(immediate_payloads))
+                        
+                        # Update session state with results
+                        st.session_state.email_sending_results = results
+                        st.session_state.email_sending_completed = True
+                        
+                        # Display results
+                        if results['successful'] > 0:
+                            st.success(f"Successfully sent {results['successful']} immediate emails")
+                        if results['failed'] > 0:
+                            st.error(f"Failed to send {results['failed']} immediate emails")
+                            for error in results['errors']:
+                                st.error(error)
+                    else:
+                        st.warning("No immediate emails to send")
+                    
+                    # Schedule follow-up emails
+                    if followup_payloads:
+                        print(f"[DEBUG] Scheduling {len(followup_payloads)} follow-up emails")
+                        from mongodb_client import schedule_followup_emails
+                        from personalised_email import FOLLOWUP_PROMPTS
+                        
+                        # Group follow-ups by lead
+                        followups_by_lead = {}
+                        for payload in followup_payloads:
+                            lead_email = payload['email'][0]
+                            if lead_email not in followups_by_lead:
+                                followups_by_lead[lead_email] = []
+                            followups_by_lead[lead_email].append(payload)
+                        
+                        # Schedule follow-ups for each lead
+                        for lead_email, lead_payloads in followups_by_lead.items():
+                            # Create base payload
+                            base_payload = {
+                                "subject": lead_payloads[0]["subject"],
+                                "body": lead_payloads[0]["body"]
+                            }
+                            
+                            # Get intervals for this lead
+                            intervals = [p["interval_day"] for p in lead_payloads]
+                            
+                            # Schedule the follow-ups
+                            scheduled_ids = schedule_followup_emails(
+                                lead_email=lead_email,
+                                sender_email=sender_email,
+                                sender_name=sender_name,
+                                initial_time=current_time,
+                                base_payload=base_payload,
+                                prompts_by_day={day: FOLLOWUP_PROMPTS[day] for day in intervals},
+                                intervals=intervals
+                            )
+                            
+                            if scheduled_ids:
+                                successful += 1
+                            else:
+                                failed += 1
+                        
+                        st.success(f"Successfully scheduled {successful} follow-up email sequences")
+                        if failed > 0:
+                            st.warning(f"Failed to schedule {failed} follow-up email sequences")
+                    else:
+                        st.info("No follow-up emails to schedule")
 
     # Add Signature page
     elif selected_tab == "Add Signature":

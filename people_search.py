@@ -76,8 +76,11 @@ def get_people_search_results(
             response.raise_for_status()
             data = response.json()
             print(f"\nPage {current_page} - Response has {len(data.get('people', []))} people")
-            if 'people' in data:
-                for person in data['people']:
+            
+            # Handle both 'contacts' and 'people' arrays
+            people = data.get('people', []) or data.get('contacts', [])
+            if people:
+                for person in people:
                     if person.get('email_status') != 'unavailable':
                         org_name = person.get('organization', {}).get('name')
                         if not org_name or org_name == 'N/A':
@@ -103,7 +106,7 @@ def get_people_search_results(
                             'page_number': current_page
                         }
                         all_results.append(person_data)
-                if len(data['people']) < per_page:
+                if len(people) < per_page:
                     break
         except requests.exceptions.RequestException as e:
             print(f"❌ Error on page {current_page}: {e}")

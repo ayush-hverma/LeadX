@@ -21,19 +21,24 @@ def get_people_data(lead_ids: list) -> pd.DataFrame:
     """
     url = "https://api.apollo.io/api/v1/people/bulk_match?reveal_personal_emails=false&reveal_phone_number=false"
     
+    # Ensure all IDs are strings
+    lead_ids = [str(id) for id in lead_ids]
     payload = {"details": [{"id": id} for id in lead_ids]}
+    
     headers = {
         "accept": "application/json",
         "Cache-Control": "no-cache",
         "Content-Type": "application/json",
         "x-api-key": APOLLO_API_KEY or ""
     }
-    print(f"Using Apollo API Key: {APOLLO_API_KEY}")
+    print(f"\nEnriching {len(lead_ids)} leads:")
+    print(f"Lead IDs: {lead_ids}")
+    print(f"Using Apollo API Key: {APOLLO_API_KEY[:5]}...{APOLLO_API_KEY[-5:]}")
 
     try:
         response = requests.post(url, json=payload, headers=headers)
         print(f"Apollo API response status: {response.status_code}")
-        print(f"Apollo API response text: {response.text[:500]}")
+        print(f"Apollo API response text: {response.text}")
         response.raise_for_status()
         data = response.json()
         
@@ -41,7 +46,16 @@ def get_people_data(lead_ids: list) -> pd.DataFrame:
         people_data = []
         
         if 'matches' in data:
-            for person in data['matches']:
+            print(f"\nProcessing {len(data['matches'])} matches")
+            for i, person in enumerate(data['matches']):
+                print(f"\nProcessing match {i+1}/{len(data['matches'])}")
+                # Skip null matches
+                if person is None:
+                    print(f"Match {i+1} is null, skipping...")
+                    continue
+                    
+                print(f"Processing person: {person.get('first_name', '')} {person.get('last_name', '')}")
+                
                 # Get organization details
                 org = person.get('organization', {})
                 
@@ -62,7 +76,7 @@ def get_people_data(lead_ids: list) -> pd.DataFrame:
                 # Get organization details including short_description
                 org_short_description = org.get('short_description', 'N/A')
                 if org_short_description == 'N/A' and 'seo_description' in org:
-                    org_short_description = org.get('seo_description', 'N/A')  # Fallback to seo_description if short_description is not available
+                    org_short_description = org.get('seo_description', 'N/A')
                 
                 person_info = {
                     'lead_id': person.get('id', 'N/A'),
@@ -87,6 +101,7 @@ def get_people_data(lead_ids: list) -> pd.DataFrame:
                     'company_location': f"{org.get('city', '')}, {org.get('state', '')}, {org.get('country', '')}"
                 }
                 people_data.append(person_info)
+                print(f"Successfully processed person: {person_info['name']}")
         
         # Create DataFrame
         df = pd.DataFrame(people_data)
@@ -94,6 +109,9 @@ def get_people_data(lead_ids: list) -> pd.DataFrame:
         # Print summary
         print(f"\nProcessed {len(lead_ids)} lead IDs")
         print(f"Found {len(df)} matches")
+        
+        if df.empty:
+            print("No matches found. Check if the lead IDs are correct and try again.")
         
         return df
         

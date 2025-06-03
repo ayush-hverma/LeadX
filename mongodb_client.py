@@ -2,6 +2,7 @@ from pymongo import MongoClient
 import os
 import streamlit as st
 import logging
+from datetime import datetime
 
 # Try to get MongoDB URI from Streamlit secrets, fallback to environment variable
 MONGODB_URI = "mongodb+srv://ayu5hhverma03:ayush2503@leadx.mnrxujx.mongodb.net/?retryWrites=true&w=majority&appName=LeadX"
@@ -136,32 +137,97 @@ def mark_email_as_sent(email_id):
     """
     scheduled_emails_collection.update_one({'_id': email_id}, {'$set': {'status': 'sent'}})
 
-def schedule_followup_emails(lead_email, sender_email, sender_name, initial_time, base_payload, prompts_by_day, intervals=[0,3,7,11]):
+def schedule_followup_emails(lead_email, sender_email, sender_name, initial_time, base_payload, prompts_by_day, intervals=[0,3,8,17,24,30]):
     """
     Schedule follow-up emails at specified day intervals if no response is received.
-    prompts_by_day: dict mapping day (int) to prompt string for that day
-    base_payload: dict with any extra fields (e.g., lead_id, etc.)
+    In development mode, all follow-up emails are scheduled 2 minutes from initial time.
+    In production mode, emails are sent at 9 AM on their respective days.
+    
+    Args:
+        lead_email: Recipient's email address
+        sender_email: Sender's email address
+        sender_name: Sender's name
+        initial_time: Initial email time (datetime)
+        base_payload: Base payload for the email
+        prompts_by_day: dict mapping day (int) to prompt string for that day
+        intervals: List of days for follow-ups (default: [0,3,8,17,24,30])
     """
-    from datetime import timedelta
+    from datetime import timedelta, time as dt_time
+    from scheduled_email_worker import send_email
+    import time
     scheduled_ids = []
-    for day in intervals:
-        scheduled_time = initial_time + timedelta(days=day)
+    
+    is_development = os.getenv('ENVIRONMENT', 'production').lower() == 'development'
+    
+    for day in sorted(intervals):
+        # For 0th day, schedule immediately
+        if day == 0:
+            scheduled_time = initial_time
+            status = 'pending'
+        else:
+            if is_development:
+                # In development, schedule exactly 2 minutes from initial time
+                scheduled_time = initial_time + timedelta(minutes=2)
+            else:
+                # In production, schedule at 9 AM on the respective day
+                scheduled_time = initial_time + timedelta(days=day)
+                scheduled_time = scheduled_time.replace(hour=9, minute=0, second=0, microsecond=0)
+            status = 'pending'
+
         email_data = {
             "email": [lead_email],
-            "subject": "",  # To be filled by Gemini prompt
-            "body": "",      # To be filled by Gemini prompt
+            "subject": base_payload.get("subject", ""),
+            "body": base_payload.get("body", ""),
             "sender_email": sender_email,
             "sender_name": sender_name,
             "scheduled_time": scheduled_time,
-            "status": "pending",
-            "followup_day": day,
+            "status": status,
+            "followup_day": 0 if is_development else day,
             "responded": False,
             "prompt": prompts_by_day.get(day, ""),
-            **base_payload
+            "initial_email_time": initial_time,
+            "conversation_id": f"{sender_email}_{lead_email}_{initial_time.strftime('%Y%m%d%H%M%S')}"
         }
         scheduled_id = save_scheduled_email(email_data)
         scheduled_ids.append(scheduled_id)
+        
+        # For 0th day, send the email immediately
+        if day == 0:
+            result = send_email(email_data)
+            if result:
+                mark_email_as_sent(scheduled_id)
+                print(f"Sent initial email to {lead_email}")
+        elif is_development:
+            # In development mode, wait 2 minutes before sending follow-up
+            time.sleep(120)  # Wait for 2 minutes
+            
+            # Check if there's a reply to any previous email in this conversation
+            has_reply = check_for_reply(sender_email, lead_email, initial_time)
+            if has_reply:
+                # Cancel all pending follow-ups
+                scheduled_emails_collection.update_many(
+                    {
+                        'conversation_id': email_data['conversation_id'],
+                        'status': 'pending'
+                    },
+                    {'$set': {'status': 'cancelled', 'responded': True}}
+                )
+                print(f"Cancelled follow-up emails for {lead_email} due to reply")
+                break
+            
+            # If no reply, send the follow-up email
+            result = send_email(email_data)
+            if result:
+                mark_email_as_sent(scheduled_id)
+                print(f"Sent follow-up email to {lead_email}")
+    
     return scheduled_ids
+
+def fetch_scheduled_emails(user_email):
+    """
+    Fetch scheduled emails for the specific user.
+    """
+    return list(scheduled_emails_collection.find({'user_email': user_email}))
 
 def fetch_enriched_leads(user_email):
     """
@@ -302,3 +368,92 @@ def get_signature(user_email):
     except Exception as e:
         logging.error(f"[MongoDB] Failed to get signature for {user_email}: {e}")
         return None
+
+def check_and_update_email_responses(sender_email: str):
+    """
+    Check for replies to sent emails and update the scheduled emails collection.
+    This will mark all follow-up emails as cancelled if a reply is found.
+    
+    Args:
+        sender_email: The email address of the sender to check replies for
+    """
+    try:
+        # Get all sent emails for this sender that haven't been responded to
+        sent_emails = list(scheduled_emails_collection.find({
+            'sender_email': sender_email,
+            'status': 'sent',
+            'responded': False
+        }))
+
+        if not sent_emails:
+            return
+
+        # Group emails by conversation
+        conversation_emails = {}
+        for email in sent_emails:
+            conv_id = email.get('conversation_id')
+            if conv_id not in conversation_emails:
+                conversation_emails[conv_id] = []
+            conversation_emails[conv_id].append(email)
+
+        # Check for replies for each conversation
+        for conv_id, emails in conversation_emails.items():
+            # Get the most recent email sent in this conversation
+            latest_email = max(emails, key=lambda x: x['scheduled_time'])
+            recipient = latest_email['email'][0]  # email field is a list
+            
+            # Check if there's a reply after the latest email
+            has_reply = check_for_reply(sender_email, recipient, latest_email['scheduled_time'])
+            
+            if has_reply:
+                # Mark all pending follow-ups for this conversation as cancelled
+                scheduled_emails_collection.update_many(
+                    {
+                        'conversation_id': conv_id,
+                        'status': 'pending'
+                    },
+                    {'$set': {'status': 'cancelled', 'responded': True}}
+                )
+                logging.info(f"Marked all follow-ups for conversation {conv_id} as cancelled due to reply")
+
+    except Exception as e:
+        logging.error(f"Error checking email responses: {str(e)}")
+
+def check_for_reply(sender_email: str, recipient_email: str, after_time: datetime) -> bool:
+    """
+    Check if there's a reply from the recipient after the given time.
+    This is a placeholder function - implement the actual reply checking logic
+    based on your email provider (Outlook/Gmail).
+    """
+    try:
+        # For Outlook
+        if 'outlook.com' in sender_email or 'microsoft' in sender_email or 'panscience' in sender_email:
+            from outlook_auth import get_outlook_account
+            account = get_outlook_account()
+            if account:
+                mailbox = account.mailbox()
+                inbox = mailbox.inbox_folder()
+                
+                # Search for replies from the recipient after the given time
+                query = f"from:{recipient_email} after:{after_time.strftime('%Y-%m-%d')}"
+                messages = inbox.get_messages(query=query, limit=1)
+                
+                return len(list(messages)) > 0
+                
+        # For Gmail
+        else:
+            from auth import get_gmail_service
+            service = get_gmail_service()
+            if service:
+                # Search for replies from the recipient after the given time
+                query = f"from:{recipient_email} after:{after_time.strftime('%Y/%m/%d')}"
+                results = service.users().messages().list(userId='me', q=query).execute()
+                messages = results.get('messages', [])
+                
+                return len(messages) > 0
+                
+        return False
+        
+    except Exception as e:
+        logging.error(f"Error checking for reply: {str(e)}")
+        return False
