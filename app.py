@@ -1,32 +1,46 @@
+# Standard library imports
+import os
+import json
+import logging
+import time
+import asyncio
+from datetime import datetime
+from urllib.parse import parse_qs, urlparse
+
+# Third-party imports
 import streamlit as st
 import pandas as pd
+import dotenv
+import google.generativeai as genai
+import msal
+import requests
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from bson import ObjectId
+
+# Local imports
+from auth import (
+    init_auth, is_authenticated, get_google_auth_url, 
+    handle_auth_callback, get_user_name, logout, log_sign_in_attempt
+)
+from outlook_auth import (
+    init_outlook_auth, get_outlook_auth_url, handle_outlook_callback,
+    is_outlook_authenticated, get_outlook_email, get_outlook_name
+)
+from personalised_email import (
+    product_database, generate_email_for_single_lead_with_custom_prompt,
+    get_product_details, FOLLOWUP_PROMPTS
+)
+from mongodb_client import (
+    save_enriched_data, save_generated_emails, collection,
+    generated_emails_collection, lead_exists, delete_lead_by_id,
+    delete_email_by_id, get_signature, save_signature
+)
+from outlook_sender import prepare_outlook_email_payloads, OutlookSender
 from people_search import get_people_search_results
 from people_enrich import get_people_data
 from mail_generation import EmailGenerationPipeline
 from email_sender import EmailSender, prepare_email_payloads
-import time
-import asyncio
-import json
-import PyPDF2
-import io
-import dotenv
-import logging
-from personalised_email import product_database, generate_email_for_single_lead, generate_email_for_multiple_leads, get_product_details
-from auth import init_auth, is_authenticated, get_google_auth_url, handle_auth_callback, get_user_name, logout, log_sign_in_attempt
-from outlook_auth import init_outlook_auth, get_outlook_auth_url, handle_outlook_callback, is_outlook_authenticated, get_outlook_email
-from urllib.parse import parse_qs, urlparse
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import os
-import google.generativeai as genai
-import msal
-import requests
-from outlook_sender import prepare_outlook_email_payloads, OutlookSender
-from outlook_auth import get_outlook_name
-from mongodb_client import save_enriched_data, save_generated_emails, collection, generated_emails_collection, lead_exists, delete_lead_by_id, delete_email_by_id, get_signature, save_signature
-import bson
-from datetime import datetime
-from bson import ObjectId
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -53,7 +67,6 @@ google_client_id = st.secrets["GOOGLE_CLIENT_ID"]
 redirect_uri = st.secrets["REDIRECT_URI"]
 google_client_secret = st.secrets["GOOGLE_CLIENT_SECRET"]
 google_project_id = st.secrets["GOOGLE_PROJECT_ID"]
-# google_redirect_uris = st.secrets["GOOGLE_REDIRECT_URIS"]
 
 # Azure AD configuration
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -265,30 +278,16 @@ def prepare_email_payloads(generated_emails, enriched_data):
     """Prepare email payloads for sending emails."""
     payloads = []
     
-    # Check authentication
-    if not is_outlook_authenticated() and not is_authenticated():
-        print("[DEBUG] No authentication found")
-        return payloads
-        
-    # Get sender information based on authentication method
-    if is_outlook_authenticated():
-        sender_email = get_outlook_email()
-        sender_name = get_outlook_name()
-    else:
-        sender_email = get_user_email()
-        sender_name = get_user_name()
+    # Get sender information
+    sender_email = get_outlook_email() if is_outlook_authenticated() else get_user_email()
+    sender_name = get_outlook_name() if is_outlook_authenticated() else get_user_name()
     
     if not sender_email:
         print("[DEBUG] No sender email found")
-        return payloads
-    
-    if not generated_emails:
-        print("[DEBUG] No generated emails provided")
-        return payloads
+        return []
         
-    if enriched_data is None:
-        print("[DEBUG] No enriched data provided")
-        return payloads
+    # Get user's signature
+    signature = get_signature(sender_email)
     
     for lead_block in generated_emails:
         try:
@@ -326,8 +325,13 @@ def prepare_email_payloads(generated_emails, enriched_data):
                         body = body.replace("Best Regards,", "")
                         body = body.strip()
                         
+                        if signature:
+                            body = email.get('body', '')
+                            if body.strip().endswith("Best Regards,"):
+                                body = body.rstrip() + f"\n\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
+                                email['body'] = body
                         # Add the properly formatted closing
-                        body = f"{body}\n\nBest Regards,\n{sender_name}"
+                        # body = f"{body}\n\nBest Regards,\n{sender_name}"
                     
                     # Create payload for Outlook
                     payload = {
@@ -735,7 +739,7 @@ def main():
                                     "state": o.get("state"),
                                     "country": o.get("country"),
                                     "founded_year": o.get("founded_year"),
-                                    "num_contacts": o.get("num_contacts"),
+                                    # "num_contacts": o.get("num_contacts"),
                                 } for o in orgs
                             ])
                             st.session_state["org_search_results"] = org_df
@@ -763,8 +767,8 @@ def main():
                     st.subheader("Step 2: Search People in Organization")
                     job_titles = st.text_input("Job Titles (comma-separated)", help="e.g. CEO, CTO")
                     org_id = st.text_input("Organization ID", value=st.session_state["selected_org_id"], disabled=True)
-                    results = st.number_input("Results (number of people to fetch)", min_value=1, max_value=100, value=10)
-                    per_page = st.number_input("Results per page", min_value=1, max_value=100, value=10)
+                    results = st.number_input("Results (number of people to fetch)", min_value=1, max_value=250, value=5)
+                    per_page = st.number_input("Results per page", min_value=1, max_value=100, value=1)
                     people_submitted = st.form_submit_button("Search People in Organization")
                 if people_submitted:
                     apollo_people_url = "https://api.apollo.io/api/v1/mixed_people/search"
@@ -947,7 +951,7 @@ def main():
                             if signature:
                                 body = email.get('body', '')
                                 if body.strip().endswith("Best Regards,"):
-                                    body = body.rstrip() + f"\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
+                                    body = body.rstrip() + f"\n\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
                                     email['body'] = body
                             
                             email["interval_day"] = day
@@ -978,7 +982,7 @@ def main():
                 .followup-lead-block { background: #f8fafd; border-radius: 10px; margin-bottom: 18px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.03); }
                 .followup-lead-title { font-size: 18px; font-weight: 600; color: #1a237e; margin-bottom: 8px; }
                 .followup-tab { margin-bottom: 10px; }
-                .followup-email-body { background: #f0f1f5; border-radius: 6px; padding: 12px 14px; font-family: Menlo,Consolas,monospace,monospace; color: #222; font-size: 15px; white-space: pre-wrap; word-break: break-word; }
+                .followup-email-body { background: #f0f1f5; border-radius: 6px; padding: 12px; font-family: Menlo,Consolas,monospace,monospace; color: #222; font-size: 10px; white-space: pre-wrap; word-break: break-word; }
                 .followup-email-meta { color: #555; font-size: 14px; margin-bottom: 4px; }
                 </style>
                 """
@@ -1056,6 +1060,9 @@ def main():
                         st.error("Could not get sender information. Please try logging in again.")
                         return
                     
+                    # Get user's signature
+                    signature = get_signature(sender_email)
+                    
                     # Get current time for scheduling
                     current_time = datetime.now()
                     
@@ -1097,8 +1104,13 @@ def main():
                                         body = body.replace("Best Regards,", "")
                                         body = body.strip()
                                         
+                                        if signature:
+                                            body = email.get('body', '')
+                                            if body.strip().endswith("Best Regards,"):
+                                                body = body.rstrip() + f"\n\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
+                                                email['body'] = body
                                         # Add the properly formatted closing
-                                        body = f"{body}\n\nBest Regards,\n{sender_name}"
+                                        #body = f"{body}\n\nBest Regards,\n{sender_name}"
                                     
                                     # Create payload
                                     payload = {
@@ -1129,34 +1141,30 @@ def main():
                         st.error("No valid email payloads to send")
                         return
                     
-                    # Send immediate emails (day 0)
+                    # Send immediate emails (0th day)
                     if immediate_payloads:
                         print(f"[DEBUG] Sending {len(immediate_payloads)} immediate emails")
-                        if isinstance(sender, OutlookSender):
-                            results = sender.send_email_batch(immediate_payloads)
-                        else:
-                            import asyncio
-                            results = asyncio.run(sender.send_emails(immediate_payloads))
+                        for payload in immediate_payloads:
+                            try:
+                                result = sender.send_email_batch([payload])
+                                if result:
+                                    successful += 1
+                                else:
+                                    failed += 1
+                            except Exception as e:
+                                print(f"[DEBUG] Error sending immediate email: {str(e)}")
+                                failed += 1
                         
-                        # Update session state with results
-                        st.session_state.email_sending_results = results
-                        st.session_state.email_sending_completed = True
-                        
-                        # Display results
-                        if results['successful'] > 0:
-                            st.success(f"Successfully sent {results['successful']} immediate emails")
-                        if results['failed'] > 0:
-                            st.error(f"Failed to send {results['failed']} immediate emails")
-                            for error in results['errors']:
-                                st.error(error)
+                        st.success(f"Successfully sent {successful} immediate emails")
+                        if failed > 0:
+                            st.warning(f"Failed to send {failed} immediate emails")
                     else:
-                        st.warning("No immediate emails to send")
+                        st.info("No immediate emails to send")
                     
                     # Schedule follow-up emails
                     if followup_payloads:
                         print(f"[DEBUG] Scheduling {len(followup_payloads)} follow-up emails")
                         from mongodb_client import schedule_followup_emails
-                        from personalised_email import FOLLOWUP_PROMPTS
                         
                         # Group follow-ups by lead
                         followups_by_lead = {}
@@ -1171,7 +1179,9 @@ def main():
                             # Create base payload
                             base_payload = {
                                 "subject": lead_payloads[0]["subject"],
-                                "body": lead_payloads[0]["body"]
+                                "body": lead_payloads[0]["body"],
+                                "recipient": lead_payloads[0].get("recipient", ""),
+                                "product_details": lead_payloads[0].get("product_details", "")
                             }
                             
                             # Get intervals for this lead

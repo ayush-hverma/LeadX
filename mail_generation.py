@@ -7,7 +7,7 @@ from datetime import datetime
 import os
 import streamlit as st
 from auth import get_user_name, get_user_email
-from personalised_email import generate_email_for_single_lead
+from personalised_email import generate_email_for_single_lead_with_custom_prompt
 from outlook_auth import is_outlook_authenticated
 from mongodb_client import get_signature
 
@@ -135,7 +135,7 @@ class EmailGenerationPipeline:
             return None
             
         try:
-            result = generate_email_for_single_lead(lead_details, formatted_product, product_name=product_name)
+            result = generate_email_for_single_lead_with_custom_prompt(lead_details, formatted_product, product_name=product_name)
             body = result.get("body", "")
             
             # Add signature if it exists

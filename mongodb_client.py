@@ -139,55 +139,80 @@ def mark_email_as_sent(email_id):
 
 def schedule_followup_emails(lead_email, sender_email, sender_name, initial_time, base_payload, prompts_by_day, intervals=[0,3,8,17,24,30]):
     """
-    Schedule follow-up emails at specified day intervals if no response is received.
-    In development mode, all follow-up emails are scheduled 2 minutes from initial time.
-    In production mode, emails are sent at 9 AM on their respective days.
+    Schedule follow-up emails for a lead.
     
     Args:
-        lead_email: Recipient's email address
-        sender_email: Sender's email address
-        sender_name: Sender's name
-        initial_time: Initial email time (datetime)
-        base_payload: Base payload for the email
-        prompts_by_day: dict mapping day (int) to prompt string for that day
-        intervals: List of days for follow-ups (default: [0,3,8,17,24,30])
-    """
-    from datetime import timedelta, time as dt_time
-    from scheduled_email_worker import send_email
-    import time
-    scheduled_ids = []
+        lead_email (str): Email address of the lead
+        sender_email (str): Email address of the sender
+        sender_name (str): Name of the sender
+        initial_time (datetime): Time when the initial email was sent
+        base_payload (dict): Base email payload containing subject and body
+        prompts_by_day (dict): Dictionary mapping day numbers to their respective prompts
+        intervals (list): List of days to send follow-ups (default: [0,3,8,17,24,30])
     
+    Returns:
+        list: List of scheduled email IDs
+    """
+    from datetime import timedelta
+    import time
+    from scheduled_email_worker import send_email  # Import here to avoid circular dependency
+    
+    scheduled_ids = []
     is_development = os.getenv('ENVIRONMENT', 'production').lower() == 'development'
     
+    # Get the initial subject from base_payload
+    initial_subject = base_payload.get("subject", "")
+    
+    # Get lead details from the initial email
+    lead_details = {
+        "email": lead_email,
+        "name": base_payload.get("recipient", ""),
+    }
+    
+    # Get product details from the initial email
+    product_details = base_payload.get("product_details", "")
+    
     for day in sorted(intervals):
-        # For 0th day, schedule immediately
+        # For 0th day, use the initial email
         if day == 0:
-            scheduled_time = initial_time
-            status = 'pending'
+            email_data = {
+                "email": [lead_email],
+                "subject": initial_subject,
+                "body": base_payload.get("body", ""),
+                "sender_email": sender_email,
+                "sender_name": sender_name,
+                "scheduled_time": initial_time,
+                "status": 'pending',
+                "followup_day": 0,
+                "responded": False,
+                "prompt": prompts_by_day.get(day, ""),
+                "initial_email_time": initial_time,
+                "conversation_id": f"{sender_email}_{lead_email}_{initial_time.strftime('%Y%m%d%H%M%S')}"
+            }
         else:
+            # For follow-ups, use the provided email content
+            # Calculate scheduled time
             if is_development:
-                # In development, schedule exactly 2 minutes from initial time
                 scheduled_time = initial_time + timedelta(minutes=2)
             else:
-                # In production, schedule at 9 AM on the respective day
                 scheduled_time = initial_time + timedelta(days=day)
                 scheduled_time = scheduled_time.replace(hour=9, minute=0, second=0, microsecond=0)
-            status = 'pending'
-
-        email_data = {
-            "email": [lead_email],
-            "subject": base_payload.get("subject", ""),
-            "body": base_payload.get("body", ""),
-            "sender_email": sender_email,
-            "sender_name": sender_name,
-            "scheduled_time": scheduled_time,
-            "status": status,
-            "followup_day": 0 if is_development else day,
-            "responded": False,
-            "prompt": prompts_by_day.get(day, ""),
-            "initial_email_time": initial_time,
-            "conversation_id": f"{sender_email}_{lead_email}_{initial_time.strftime('%Y%m%d%H%M%S')}"
-        }
+            
+            email_data = {
+                "email": [lead_email],
+                "subject": initial_subject,  # Always use the initial subject
+                "body": base_payload.get("body", ""),  # Use the provided body
+                "sender_email": sender_email,
+                "sender_name": sender_name,
+                "scheduled_time": scheduled_time,
+                "status": 'pending',
+                "followup_day": 0 if is_development else day,
+                "responded": False,
+                "prompt": prompts_by_day.get(day, ""),
+                "initial_email_time": initial_time,
+                "conversation_id": f"{sender_email}_{lead_email}_{initial_time.strftime('%Y%m%d%H%M%S')}"
+            }
+        
         scheduled_id = save_scheduled_email(email_data)
         scheduled_ids.append(scheduled_id)
         
@@ -197,29 +222,6 @@ def schedule_followup_emails(lead_email, sender_email, sender_name, initial_time
             if result:
                 mark_email_as_sent(scheduled_id)
                 print(f"Sent initial email to {lead_email}")
-        elif is_development:
-            # In development mode, wait 2 minutes before sending follow-up
-            time.sleep(120)  # Wait for 2 minutes
-            
-            # Check if there's a reply to any previous email in this conversation
-            has_reply = check_for_reply(sender_email, lead_email, initial_time)
-            if has_reply:
-                # Cancel all pending follow-ups
-                scheduled_emails_collection.update_many(
-                    {
-                        'conversation_id': email_data['conversation_id'],
-                        'status': 'pending'
-                    },
-                    {'$set': {'status': 'cancelled', 'responded': True}}
-                )
-                print(f"Cancelled follow-up emails for {lead_email} due to reply")
-                break
-            
-            # If no reply, send the follow-up email
-            result = send_email(email_data)
-            if result:
-                mark_email_as_sent(scheduled_id)
-                print(f"Sent follow-up email to {lead_email}")
     
     return scheduled_ids
 

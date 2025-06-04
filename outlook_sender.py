@@ -172,11 +172,11 @@ def prepare_outlook_email_payloads(generated_emails: List[Dict[str, Any]], enric
                     # Format the email body with proper closing
                     if body.strip().endswith("Best Regards,"):
                         if signature:
-                            body = body.rstrip() + f"\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
+                            body = body.rstrip() + f"\n\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
                         else:
                             # Fallback to first name if no signature
                             first_name = sender_name.split()[0] if sender_name else ""
-                            body = body.rstrip() + f"\n{first_name}\n"
+                            body = body.rstrip() + f"\n\n{first_name}\n"
                     
                     # Create payload with only lead_id
                     payloads.append({
