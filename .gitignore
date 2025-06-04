@@ -61,6 +61,8 @@ outlook_token.pkl
 google_token.pkl
 token.pickle
 
+.auth/
+
 emails/
 
 .devcontainer/
