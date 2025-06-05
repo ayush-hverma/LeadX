@@ -140,7 +140,7 @@ class EmailGenerationPipeline:
             subject = result.get("subject", "")
             
             # Save the initial subject line for this lead
-            save_initial_subject(lead_details["email"], subject, sender_email)
+            # save_initial_subject(lead_details["email"], subject, sender_email)
             
             # Add signature if it exists
             if body.strip().endswith("Best Regards,"):

@@ -51,40 +51,45 @@ Write a strict, direct, and to-the-point subject line (60-90 characters) that ca
 body_style = """
 Start with a greeting and then go on to say that you are reaching out because of [reason].
 Do not use too much buttering and unnecessary words specially after the first line (I was going through your profile and noticed your inspiring journey is phenomenal,fabulous, etc. Don't use such unnecessary buttering. Jus go like "I was going through your profile and noticed [mention things which are relevant to product and matches with the lead's profile, no unnecessary buttering]")
-Be casual, friendly and direct but not too casual.
+Be business casual and direct.
+Keep the tone polite, respectful, clear, confident, value focused, courteous, modern, positive and neutral.
 Do not use general statements like "I was going through your profile and noticed your inspiring journey is phenomenal,fabulous, etc."
-Do not use generic phrases like " I was checking out <company name> and noticed <something relevant to product>".
+Do not use generic phrases like "I was checking out <company name> and noticed <something relevant to product>".
 Never print the lead's id in the email.
 Always mention the product name as provided in the product details.
-Always mention the company name as 'PanScience Innovations' when referring to the company.
-Never mention the sender's name in the email except in the signature.
-It should be a short, personalized email (150-200 words) to a potential lead who could benefit from your product/service/solution. It should:
-                    1.  Start with deep personalization — Reference something specific about the lead's business, role, recent announcement, or pain point you've identified. Show you understand them—not just their company name. Use different phrases/styles/variation/words to start the email.
-                    2.  Make a relevant connection — Briefly explain that you are from PanScience Innovations and why you're reaching out. Make it clear why they specifically are a fit for what you offer.
-                    3.  Talk about the problems in the lead's industry and how [PRODUCT_NAME] can solve the problem.
-                    4.  Focus on value (not features) — Position [PRODUCT_NAME] around a problem or opportunity that matters to them. Avoid a hard sell—offer insight, benefit, or a useful idea that shows you can help.
+Do not over-use the name of the product. Use phrases like our product, etc.
+Always mention the company name as Team {product_name} when referring to the company.
+
+Give a brief introduction about your company name. Highlight how your company can help the lead's company/industry.
+
+It should be a concise, personalized email (150-200 words) to a potential lead who could benefit their organization from your product/service/solution. It should:
+                    1.  Start with — Reference something specific about the lead's business, role, recent announcement, or pain point in the industry you've identified. Show you understand them—not just their company name. Use different phrases/styles/variation/words to start the email.
+                    2.  Make a relevant connection — Briefly explain that you are from Team {product_name} and why you're reaching out. Make it clear why they specifically are a fit for what you offer. Do not try to over-fit the product into the mail.
+                    3.  Talk about the problems in the lead's industry and how {product_name} can solve the problem.
+                    4.  Focus on value (not features) — Position {product_name} around a problem or opportunity that matters to them. Avoid a hard sell—offer insight, benefit, or a useful idea that shows you can help.
                     5.  Keep it short and natural — Write like a human, not a sales robot. 
-                    6.  End with a simple CTA (e.g., "open to a quick chat?" or "would you be interested in exploring this further?").
-                    7.  End the email with "Best Regards," on a new line, followed by a blank line
+                    6.  End with a simple CTA(e.g., "open to a quick chat?", "would you be interested in exploring this further?", etc.) on a new line, followed by a blank line.
+                    7.  End the email with "Best Regards," on a new line, followed by a blank line.
 
 When describing the product, include:
 1.  Start with the product name and then go on to describe the product.
-2. Core Problem Solved: Clearly state the main problem [PRODUCT_NAME] addresses in their industry
-3. Key Features: Mention 2-3 most relevant features that directly solve their pain points
-4. Specific Benefits: Include concrete benefits with numbers/statistics where possible (e.g., "reduces processing time by 40%")
-5. Industry-Specific Value: Explain how [PRODUCT_NAME] is particularly valuable for their specific industry/role
-6. Implementation Ease: Briefly mention how easy it is to get started or integrate
+2. Core Problem Solved: Clearly state the main problem {product_name} addresses in their industry.
+3. Key Features: Mention 2-3 most relevant features that directly solve their pain points.
+4. Specific Benefits: Include concrete benefits with numbers/statistics where possible (e.g., "reduces processing time by 40%", etc).
+5. Industry-Specific Value: Explain how {product_name} is particularly valuable for their specific company/industry/role.
+6. Implementation Ease: Briefly mention how easy it is to get started or integrate the product into their company.
 
+Important: Use bullet points to describe the product. Keep a professional yet business casual formatting.
 Use human like tone and language. Follow this style:
 1. First Person Pronouns: I, me, my, mine, we, us, our, ours. Write as if you are the one talking to the lead and do not use generalised statements.
 2. Fillers & Disfluencies
 Spoken or informal written human language often includes:
-    •   uh, um, like, you know, kinda, sorta, actually, basically, literally, just, u, so, of course, ok, sure, etc.
-    •   contractions: gonna, wanna, gotta, ain't, don't, can't, won't, wasn't, weren't, wouldn't, couldn't, shouldn't, needn't, aren't, isn't, etc.
+    •   like, you know, actually, basically, literally, just, so, of course, ok, sure, etc.
+    •   contractions:  don't, can't, won't, wasn't, weren't, wouldn't, couldn't, shouldn't, needn't, aren't, isn't, etc.
 3. Personal Experience Markers
     •   I think, I believe, I feel, in my opinion, according to me, in my view, as per me, as I see, as I feel, as I believe, as I think, so, of course, etc.
-    •   yesterday, last week, when I was in school, last month, last year, just last week, just last month, just last year, first thing in the morning, last night, morning, evening, etc.
-    •   my friend, my boss, my mom, my friend's friend, my friend's boss, my friend's mom, etc.
+    •   yesterday, last week, last month, last year, just last week, just last month, just last year, last night, morning, evening, etc.
+    •   my friend, my boss, my co-worker, my friend's boss, etc.
 4. Typos and Misspellings
 Humans often make minor spelling or grammatical errors:
     •   definately → definitely
@@ -93,9 +98,6 @@ Humans often make minor spelling or grammatical errors:
     •   seperately → separately
     •   seperated → separated
     •   you're → you are
-    •   your → you're
-    •   there → their
-    •   theirs → there's
     •   they're → they are
     •   we're → we are
     •   we've → we have
@@ -110,10 +112,12 @@ Humans often make minor spelling or grammatical errors:
     •   isn't → is not
 5. Emotional/Spontaneous Expressions
 Humans express feelings impulsively or with less filter:
-    •   wow, amazing, omg, oh my god, oh my gosh, oh my gosh, oh my gosh, aww, haha, lol, rofl, lmao, hehehe,  damn, smh, idk, meh, pfft, yikes, whaaat, no way, sigh, yay, wuhoo, hell yeah, hell no, hell yeah, hell no,hahaha, haha, woohoo, woot, yay, yaaay, whoa, woah, omg, oh my god, lol, lmao, rofl, hehe, heehee, yaaas, yesss, wow, wowza, omgosh, oh wow, aww, awww, whew, phew, omg yaaay, ooooh, oooh la la, huzzah, let's gooo, heck yeah, hell yeah, oh!, ohhh, huh?, no way!, whaaat?!, yikes, dang, daaaang, whaaat the—, ugh, ughhh, meh, pfft, grrr, smh, sigh, sheesh, huhh, etc.
-    •   love it, hate that, so cool, super weird, so bad, so good, so happy, so sad, so excited, so nervous, hahaha, haters gonna hate, lovers gonna love, etc.
+    •   amazing, oh my god, ugh, etc.
+    •   love it, good, happy, excited, nervous, etc.
 
 Important: The email body should end with "Best Regards," on a new line, followed by a blank line.
+Important: Always use company name as Team {product_name}.
+Important: Do not over-use the {product_name}. Use phrases like our product, etc.
 """
 
 product_database = {
@@ -557,7 +561,7 @@ Lead Details:
 {lead_details}
 
 Product Details:
-{product_details}
+{product_database}
 
 Follow this style guide for the subject:
 {subject_style}
@@ -569,9 +573,11 @@ Important:
 1. DO NOT include any lead IDs, reference numbers, or technical identifiers in the email.
 2. End the email body with "Best Regards," on a new line, followed by a blank line.
 3. DO NOT include any sender name in the email body.
-4. Always use "{product_name}" instead of [PRODUCT_NAME] when referring to the product.
+4. Always use mention your company name as Team {product_name},
+4. Always use {product_name} instead of [PRODUCT_NAME] when referring to the product.
 5. The email will be sent to: {recipient_name} <{recipient_email}>
 
+Important: Do not over-use the {product_name}. Use phrases like our product, etc.
 You MUST return a valid JSON object with EXACTLY these fields:
 {{
     "subject": "Your subject line here",
@@ -588,23 +594,26 @@ Lead Details:
 {lead_details}
 
 Product Details:
-{product_details}
+{product_database}
 
 Follow this style guide for the body:
 {body_style}
 
 Instructions:
 - DO NOT PUT phrases like "I was checking out your website" or "I was checking out your LinkedIn profile" in the body of the email.
-- DO NOT PUT phrases like "I am reaching out from PanScience Innovations" in the body of the email.
+- DO NOT PUT phrases which show that you are stalking their profile or website like "Noticed your background in [industry/role] — it aligns well with what we're working on." etc.
+- DO NOT PUT phrases like "I am reaching out from Team {product_name} in the body of the email.
+- DO NOT PUT phrases like "I was going through your profile, etc."
+- DO NOT over-use phrases like "Just circling around", "Following up", etc.
 - Reference the previous email briefly, but do NOT repeat the original content.
-- Politely remind the lead of the value or benefit of {product_name} for their specific context.
+- Politely remind the lead of the value or benefit of {product_name} for their specific context but do not try to overfit.
 - Add a new, relevant insight, use case, or benefit that was not mentioned in the initial email.
 - Maintain a direct, professional, and concise tone—avoid unnecessary pleasantries or repetition.
-- Personalize the email based on the lead's profile or recent activity if possible.
-- End with a clear, simple CTA (e.g., "Would you be open to a quick call this week?").
+- End with a clear, simple CTA (e.g., "Would you be open to a quick call this week?", etc.).
 - Do NOT mention the lack of response directly or sound pushy.
 - End the email body with "Best Regards," on a new line, followed by a blank line. Do NOT include the sender's name.
 
+Important: Do not over-use the {product_name}. Use phrases like our product, etc.
 You MUST return a valid JSON object with EXACTLY these fields:
 {{
     "subject": "{initial_subject}",
@@ -621,7 +630,7 @@ Lead Details:
 {lead_details}
 
 Product Details:
-{product_details}
+{product_database}
 
 Follow this style guide for the body:
 {body_style}
@@ -629,15 +638,18 @@ Follow this style guide for the body:
 Instructions:
 - DO NOT PUT phrases like "I was checking out your website" or "I was checking out your LinkedIn profile" in the body of the email.
 - DO NOT PUT phrases like "I am reaching out from PanScience Innovations" in the body of the email.
+- DO NOT PUT phrases like "I was going through your profile, etc."
 - Reference your previous attempts to connect, but do NOT sound desperate or repeat earlier content.
+- It should not look like you are stalking their linkedin profile or website.
 - Share a new, compelling benefit, case study, or testimonial relevant to the lead's industry or role.
 - Emphasize how {product_name} can address a specific pain point or opportunity for the lead.
 - Keep the tone professional, direct, and value-focused.
 - Personalize the message with any new information or context about the lead or their company.
-- End with a gentle, actionable CTA (e.g., "Let me know if you'd like more details or a quick demo.").
+- End with a gentle, actionable CTA ,for example, "Let me know if you'd like more details or a quick demo.", etc.
 - Do NOT mention the lack of response directly or use guilt-tripping language.
 - End the email body with "Best Regards," on a new line, followed by a blank line. Do NOT include the sender's name.
 
+Important: Do not over-use the {product_name}. Use phrases like our product, etc.
 You MUST return a valid JSON object with EXACTLY these fields:
 {{
     "subject": "{initial_subject}",
@@ -654,23 +666,26 @@ Lead Details:
 {lead_details}
 
 Product Details:
-{product_details}
+{product_database}
 
 Follow this style guide for the body:
 {body_style}
 
 Instructions:
 - DO NOT PUT phrases like "I was checking out your website" or "I was checking out your LinkedIn profile" in the body of the email.
-- DO NOT PUT phrases like "I am reaching out from PanScience Innovations" in the body of the email.
+- DO NOT PUT phrases like "I am reaching out from Team {product_name} in the body of the email.
+- DO NOT PUT phrases like "I was going through your profile, etc."
 - Briefly acknowledge your previous emails without repeating their content.
+- It should not look like you are stalking their linkedin profile or website.
 - Offer a new perspective, recent update, or industry trend that makes {product_name} especially relevant now.
 - Highlight a unique feature or benefit of {product_name} that has not been mentioned before.
+- Provide comprehensive features or case study about the {product_name}.
 - Keep the message concise, professional, and strictly value-driven.
-- Personalize the email with any new insights about the lead or their business.
 - End with a low-friction CTA (e.g., "Would you be open to a short call to discuss if this is relevant for you?").
 - Do NOT mention the lack of response directly or use negative language.
 - End the email body with "Best Regards," on a new line, followed by a blank line. Do NOT include the sender's name.
 
+Important: Do not over-use the {product_name}. Use phrases like our product, etc.
 You MUST return a valid JSON object with EXACTLY these fields:
 {{
     "subject": "{initial_subject}",
@@ -687,22 +702,24 @@ Lead Details:
 {lead_details}
 
 Product Details:
-{product_details}
+{product_database}
 
 Follow this style guide for the body:
 {body_style}
 
 Instructions:
 - DO NOT PUT phrases like "I was checking out your website" or "I was checking out your LinkedIn profile" in the body of the email.
-- DO NOT PUT phrases like "I am reaching out from PanScience Innovations" in the body of the email.
-- Reference your previous attempts to connect, but keep it brief and professional.
+- DO NOT PUT phrases like "I am reaching out from Team {product_name} in the body of the email.
+- DO NOT PUT phrases like "I was going through your profile, etc."
+- It should not look like you are stalking their linkedin profile or website.
+- Reference your previous attempts to connect, but do not sound desperate and be professional.
 - Share a new, relevant success story, testimonial, or recent achievement of {product_name} that could resonate with the lead.
 - Emphasize the potential missed opportunity or value for the lead's business, but do NOT use guilt or pressure.
 - Keep the tone direct, respectful, and focused on the lead's needs.
-- Personalize the message with any new context or developments.
-- End with a clear, non-intrusive CTA (e.g., "If now isn't the right time, just let me know—happy to reconnect later.").
+- End with a clear, non-intrusive CTA (e.g., "If now isn't the right time, just let me know—happy to reconnect later.", etc).
 - End the email body with "Best Regards," on a new line, followed by a blank line. Do NOT include the sender's name.
 
+Important: Do not over-use the {product_name}. Use phrases like our product, etc.
 You MUST return a valid JSON object with EXACTLY these fields:
 {{
     "subject": "{initial_subject}",
@@ -719,22 +736,24 @@ Lead Details:
 {lead_details}
 
 Product Details:
-{product_details}
+{product_database}
 
 Follow this style guide for the body:
 {body_style}
 
 Instructions:
 - DO NOT PUT phrases like "I was checking out your website" or "I was checking out your LinkedIn profile" in the body of the email.
-- DO NOT PUT phrases like "I am reaching out from PanScience Innovations" in the body of the email.
+- DO NOT PUT phrases like "I am reaching out from Team {product_name} in the body of the email.
+- DO NOT PUT phrases like "I was going through your profile, etc."
+- It should not look like you are stalking their linkedin profile or website. 
 - Politely acknowledge your previous outreach and that this will be your last follow-up unless you hear back.
 - Summarize the key value or unique benefit of {product_name} for the lead's business in one or two sentences.
 - Offer to provide more information, answer questions, or reconnect in the future if their priorities change.
 - Keep the tone professional, respectful, and leave the door open for future engagement.
-- Personalize the message with any final relevant insight or context.
-- End with a courteous, open-ended CTA (e.g., "If you'd like to revisit this in the future, just reply to this email.").
+- End with a courteous, open-ended CTA (e.g., "If you'd like to revisit this in the future, just reply to this email.", etc).
 - End the email body with "Best Regards," on a new line, followed by a blank line. Do NOT include the sender's name.
 
+Important: Do not over-use the {product_name}. Use phrases like our product, etc.
 You MUST return a valid JSON object with EXACTLY these fields:
 {{
     "subject": "{initial_subject}",
@@ -793,33 +812,46 @@ def generate_email_for_single_lead_with_custom_prompt(lead_details, product_deta
         # Format the prompt with lead and product details
         formatted_prompt = prompt.format(
             lead_details=json.dumps(lead_details, indent=2),
-            product_details=json.dumps(product_details, indent=2),
+            product_database=json.dumps(product_details, indent=2),  # Changed from product_details to product_database
             subject_style=subject_style,
             body_style=body_style,
             recipient_name=recipient_name,
             recipient_email=recipient_email,
             product_name=product_name,
-            initial_subject=f"Follow-up: {product_name} for {lead_details.get('company', 'your company')}"
+            initial_subject=f'Follow-up: "{product_name} for {lead_details.get("company", "your company")}"'
         )
         
         # Generate email using Gemini
         response = generate_email_with_gemini(formatted_prompt)
         
+        if not response:
+            logger.error("No response received from Gemini API")
+            return {
+                'subject': f'Follow-up: {product_name} for {lead_details.get("company", "your company")}',
+                'body': 'Best Regards,'
+            }
+        
         # Parse the response
         try:
             email_data = json.loads(response)
             return {
-                'subject': email_data.get('subject', ''),
-                'body': email_data.get('body', '')
+                'subject': email_data.get('subject', f'Follow-up: {product_name} for {lead_details.get("company", "your company")}'),
+                'body': email_data.get('body', 'Best Regards,')
             }
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing Gemini response: {str(e)}")
             logger.error(f"Raw response: {response}")
-            return None
+            return {
+                'subject': f'Follow-up: {product_name} for {lead_details.get("company", "your company")}',
+                'body': 'Best Regards,'
+            }
             
     except Exception as e:
         logger.error(f"Error generating email: {str(e)}")
-        return None
+        return {
+            'subject': f'Follow-up: {product_name} for {lead_details.get("company", "your company")}',
+            'body': 'Best Regards,'
+        }
 
 def generate_email_for_lead(lead_details, product_details, day=0, product_name=None):
     """Generate a personalized email for a lead."""

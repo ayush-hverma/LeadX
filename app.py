@@ -1161,7 +1161,7 @@ def main():
                                         if signature:
                                             body = email.get('body', '')
                                             if body.strip().endswith("Best Regards,"):
-                                                body = body.rstrip() + f"\n\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
+                                                body = body.rstrip() + f"\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
                                                 email['body'] = body
                                     
                                     # Create payload
