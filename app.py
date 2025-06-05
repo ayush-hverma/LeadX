@@ -59,7 +59,7 @@ init_auth()
 init_outlook_auth()
 
 # Set page config
-st.set_page_config(page_title="Apollo.io People Pipeline", layout="wide")
+st.set_page_config(page_title="LeadX", layout="wide")
 
 # Example: Accessing secrets from .streamlit/secrets.toml
 apollo_api_key = st.secrets["APOLLO_API_KEY"]
