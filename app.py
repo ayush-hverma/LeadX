@@ -1033,11 +1033,11 @@ def main():
                 st.subheader("Generated Emails & Follow-ups Preview")
                 email_cards_css = """
                 <style>
-                .followup-lead-block { background: #f8fafd; border-radius: 10px; margin-bottom: 18px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.03); }
-                .followup-lead-title { font-size: 18px; font-weight: 600; color: #1a237e; margin-bottom: 8px; }
+                
+                .followup-lead-title { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
                 .followup-tab { margin-bottom: 10px; }
-                .followup-email-body { background: #f0f1f5; border-radius: 6px; padding: 12px; font-family: Menlo,Consolas,monospace,monospace; color: #222; font-size: 10px; white-space: pre-wrap; word-break: break-word; }
-                .followup-email-meta { color: #555; font-size: 14px; margin-bottom: 4px; }
+                .followup-email-body { background: #f0f1f5; border-radius: 6px; padding: 12px; color: #222; font-size: 15px; white-space: pre-wrap; word-break: break-word; }
+                .followup-email-meta { font-size: 14px; margin-bottom: 4px; }
                 </style>
                 """
                 st.markdown(email_cards_css, unsafe_allow_html=True)
