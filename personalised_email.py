@@ -590,9 +590,6 @@ Lead Details:
 Product Details:
 {product_details}
 
-Follow this style guide for the subject:
-You MUST use the exact same subject line as the initial email. DO NOT generate a new subject line.
-
 Follow this style guide for the body:
 {body_style}
 
@@ -610,7 +607,7 @@ Instructions:
 
 You MUST return a valid JSON object with EXACTLY these fields:
 {{
-    "subject": "EXACT SAME SUBJECT AS INITIAL EMAIL",
+    "subject": "{initial_subject}",
     "body": "Your email body here ending with 'Best Regards,' on a new line"
 }}
 
@@ -625,9 +622,6 @@ Lead Details:
 
 Product Details:
 {product_details}
-
-Follow this style guide for the subject:
-You MUST use the exact same subject line as the initial email. DO NOT generate a new subject line.
 
 Follow this style guide for the body:
 {body_style}
@@ -646,7 +640,7 @@ Instructions:
 
 You MUST return a valid JSON object with EXACTLY these fields:
 {{
-    "subject": "EXACT SAME SUBJECT AS INITIAL EMAIL",
+    "subject": "{initial_subject}",
     "body": "Your email body here ending with 'Best Regards,' on a new line"
 }}
 
@@ -661,9 +655,6 @@ Lead Details:
 
 Product Details:
 {product_details}
-
-Follow this style guide for the subject:
-You MUST use the exact same subject line as the initial email. DO NOT generate a new subject line.
 
 Follow this style guide for the body:
 {body_style}
@@ -682,7 +673,7 @@ Instructions:
 
 You MUST return a valid JSON object with EXACTLY these fields:
 {{
-    "subject": "EXACT SAME SUBJECT AS INITIAL EMAIL",
+    "subject": "{initial_subject}",
     "body": "Your email body here ending with 'Best Regards,' on a new line"
 }}
 
@@ -697,9 +688,6 @@ Lead Details:
 
 Product Details:
 {product_details}
-
-Follow this style guide for the subject:
-You MUST use the exact same subject line as the initial email. DO NOT generate a new subject line.
 
 Follow this style guide for the body:
 {body_style}
@@ -717,7 +705,7 @@ Instructions:
 
 You MUST return a valid JSON object with EXACTLY these fields:
 {{
-    "subject": "EXACT SAME SUBJECT AS INITIAL EMAIL",
+    "subject": "{initial_subject}",
     "body": "Your email body here ending with 'Best Regards,' on a new line"
 }}
 
@@ -732,9 +720,6 @@ Lead Details:
 
 Product Details:
 {product_details}
-
-Follow this style guide for the subject:
-You MUST use the exact same subject line as the initial email. DO NOT generate a new subject line.
 
 Follow this style guide for the body:
 {body_style}
@@ -752,7 +737,7 @@ Instructions:
 
 You MUST return a valid JSON object with EXACTLY these fields:
 {{
-    "subject": "EXACT SAME SUBJECT AS INITIAL EMAIL",
+    "subject": "{initial_subject}",
     "body": "Your email body here ending with 'Best Regards,' on a new line"
 }}
 
@@ -760,6 +745,30 @@ The response must be a valid JSON object with no additional text, markdown, or f
 Do not include any explanation or other text outside the JSON object.
 '''
 }
+
+# Configure logging
+import logging
+logger = logging.getLogger(__name__)
+
+def generate_email_with_gemini(prompt):
+    """Generate email using Gemini model."""
+    try:
+        model = genai.GenerativeModel('gemini-2.0-flash')
+        response = model.generate_content(prompt)
+        
+        # Extract JSON from the response
+        json_str = response.text.strip()
+        # Remove any markdown code block markers
+        json_str = re.sub(r'^```json\s*|\s*```$', '', json_str, flags=re.MULTILINE)
+        
+        # Log successful API call
+        logger.info("Successfully generated email with Gemini API")
+        
+        
+        return json_str
+    except Exception as e:
+        logger.error(f"Error generating email with Gemini: {str(e)}")
+        return None
 
 def get_product_details(product_name):
     # Convert product name to lowercase for case-insensitive matching
@@ -778,142 +787,77 @@ def get_product_details(product_name):
         return None
     return None
 
-def generate_email_for_single_lead_with_custom_prompt(lead_details: dict, product_details: str, day: int, product_name: str = None) -> dict:
-    """
-    Generate a personalized email for a single lead using a custom prompt (for follow-ups).
-    """
-    import google.generativeai as genai
-    import json, re, logging
+def generate_email_for_single_lead_with_custom_prompt(lead_details, product_details, prompt, subject_style, body_style, recipient_name, recipient_email, product_name, followup_day=0):
+    """Generate a personalized email for a single lead using a custom prompt."""
     try:
-        # Use explicit product_name if provided, else extract from product_details
-        if product_name is None:
-            for key in product_database.keys():
-                if key.lower() in product_details.lower():
-                    product_name = key
-                    break
-            if not product_name:
-                for line in product_details.split('\n'):
-                    if any(key.lower() in line.lower() for key in product_database.keys()):
-                        for key in product_database.keys():
-                            if key.lower() in line.lower():
-                                product_name = key
-                                break
-                        if product_name:
-                            break
-            if not product_name:
-                product_name = "our product"  # Fallback if no product name found
-
-        recipient_name = lead_details.get('name', 'No recipient')
-        recipient_email = lead_details.get('email', 'No email provided')
-
-        # --- FIX: Inject subject_style and body_style if needed ---
-        # If the prompt expects {subject_style} or {body_style}, inject them
-        prompt = FOLLOWUP_PROMPTS.get(day, "").strip()
-        if product_details is None:
-            product_details = ""
-        try:
-            if ('{subject_style}' in prompt) or ('{body_style}' in prompt):
-                prompt = prompt.format(
-                    lead_details=json.dumps({k: v for k, v in lead_details.items() if k != 'id'}, indent=2),
-                    product_details=product_details,
-                    product_name=product_name,
-                    recipient_name=recipient_name,
-                    recipient_email=recipient_email,
-                    subject_style=subject_style,
-                    body_style=body_style
-                )
-            else:
-                prompt = prompt.format(
-                    lead_details=json.dumps({k: v for k, v in lead_details.items() if k != 'id'}, indent=2),
-                    product_details=json.dumps(product_details, indent=2) if isinstance(product_details, dict) else product_details,
-                    product_name=product_name,
-                    recipient_name=recipient_name,
-                    recipient_email=recipient_email
-                )
-        except Exception as e:
-            logging.error(f"Exception during prompt formatting: {e}")
-            raise
-
-        # Get response from Gemini
-        try:
-            model = genai.GenerativeModel('gemini-2.0-flash')
-            response = model.generate_content(
-                prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.1,
-                    max_output_tokens=8000,
-                )
-            )
-            logging.info("Gemini API call succeeded.")
-            if response is None:
-                logging.error("Gemini API returned None response!")
-                raise ValueError("Gemini API returned None response!")
-            if not hasattr(response, 'text'):
-                logging.error(f"Gemini response missing 'text' attribute: {dir(response)}")
-                raise ValueError("Gemini response missing 'text' attribute!")
-        except Exception as e:
-            import traceback
-            logging.error(f"Gemini API call failed: {str(e)}")
-            traceback.print_exc()
-            logging.error(f"Gemini API call failed: {str(e)}", exc_info=True)
-            return {
-                "subject": "Error generating email",
-                "body": f"Gemini API call failed: {str(e)}\n\n",
-                "lead_id": lead_details.get("id", ""),
-                "recipient": recipient_name,
-                "recipient_email": recipient_email
-            }
+        # Format the prompt with lead and product details
+        formatted_prompt = prompt.format(
+            lead_details=json.dumps(lead_details, indent=2),
+            product_details=json.dumps(product_details, indent=2),
+            subject_style=subject_style,
+            body_style=body_style,
+            recipient_name=recipient_name,
+            recipient_email=recipient_email,
+            product_name=product_name,
+            initial_subject=f"Follow-up: {product_name} for {lead_details.get('company', 'your company')}"
+        )
+        
+        # Generate email using Gemini
+        response = generate_email_with_gemini(formatted_prompt)
         
         # Parse the response
         try:
-            response_text = response.text.strip()
-            
-            # Try to find JSON in the response
-            json_match = re.search(r'\{[\s\S]*\}', response_text)
-            if json_match:
-                try:
-                    response_json = json.loads(json_match.group())
-                    if not isinstance(response_json, dict):
-                        raise ValueError("Response is not a dictionary")
-                    
-                    # Validate required fields
-                    if "subject" not in response_json or "body" not in response_json:
-                        raise ValueError("Missing required fields in response")
-                    
-                    body = response_json.get("body", "")
-                    body = body.replace("[PRODUCT_NAME]", product_name)
-                    if not body.endswith('\n\n'):
-                        body = body.rstrip() + '\n\n'
-                    return {
-                        "subject": response_json.get("subject", ""),
-                        "body": body,
-                        "lead_id": lead_details.get("id", ""),
-                        "recipient": recipient_name,
-                        "recipient_email": recipient_email
-                    }
-                except json.JSONDecodeError as je:
-                    logging.error(f"JSON decode error: {je}")
-                    raise ValueError(f"Invalid JSON format: {je}")
-            else:
-                raise ValueError("No JSON found in response")
-        except Exception as e:
-            logging.error(f"Exception while parsing Gemini response: {e}")
-            logging.error(f"Error parsing response: {str(e)}")
+            email_data = json.loads(response)
             return {
-                "subject": "Error generating email",
-                "body": f"An error occurred while generating the email: {str(e)}\n\n",
-                "lead_id": lead_details.get("id", ""),
-                "recipient": recipient_name,
-                "recipient_email": recipient_email
+                'subject': email_data.get('subject', ''),
+                'body': email_data.get('body', '')
             }
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing Gemini response: {str(e)}")
+            logger.error(f"Raw response: {response}")
+            return None
+            
     except Exception as e:
-        logging.error(f"Error generating email: {str(e)}")
+        logger.error(f"Error generating email: {str(e)}")
+        return None
+
+def generate_email_for_lead(lead_details, product_details, day=0, product_name=None):
+    """Generate a personalized email for a lead."""
+    try:
+        # Get the appropriate prompt based on the day
+        prompt = FOLLOWUP_PROMPTS[day]
+        
+        # Get the recipient details
+        recipient_name = lead_details.get('name', 'No recipient')
+        recipient_email = lead_details.get('email', 'No email provided')
+        
+        # Generate the email
+        email_data = generate_email_for_single_lead_with_custom_prompt(
+            lead_details=lead_details,
+            product_details=product_details,
+            prompt=prompt,
+            subject_style=subject_style,
+            body_style=body_style,
+            recipient_name=recipient_name,
+            recipient_email=recipient_email,
+            product_name=product_name,
+            followup_day= day
+        )
+        
+        if email_data:
+            return email_data
+            
+        else:
+            return {
+                "subject": "[No subject generated]",
+                "body": "[No body generated]"
+            }
+            
+    except Exception as e:
+        logger.error(f"Error generating email for lead: {str(e)}")
         return {
-            "subject": "Error generating email",
-            "body": f"An error occurred while generating the email: {str(e)}\n\n",
-            "lead_id": lead_details.get("id", ""),
-            "recipient": lead_details.get('name', ''),
-            "recipient_email": lead_details.get('email', '')
+            "subject": "[No subject generated]",
+            "body": "[No body generated]"
         }
 
 

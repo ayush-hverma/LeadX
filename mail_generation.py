@@ -137,6 +137,10 @@ class EmailGenerationPipeline:
         try:
             result = generate_email_for_single_lead_with_custom_prompt(lead_details, formatted_product, product_name=product_name)
             body = result.get("body", "")
+            subject = result.get("subject", "")
+            
+            # Save the initial subject line for this lead
+            save_initial_subject(lead_details["email"], subject, sender_email)
             
             # Add signature if it exists
             if body.strip().endswith("Best Regards,"):
@@ -149,7 +153,7 @@ class EmailGenerationPipeline:
                     
             return {
                 "final_result": {
-                    "subject": result.get("subject", ""),
+                    "subject": subject,
                     "body": body
                 },
                 "lead_id": lead_details["lead_id"],

@@ -2,7 +2,7 @@ from pymongo import MongoClient
 import os
 import streamlit as st
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Try to get MongoDB URI from Streamlit secrets, fallback to environment variable
 MONGODB_URI = "mongodb+srv://ayu5hhverma03:ayush2503@leadx.mnrxujx.mongodb.net/?retryWrites=true&w=majority&appName=LeadX"
@@ -137,93 +137,47 @@ def mark_email_as_sent(email_id):
     """
     scheduled_emails_collection.update_one({'_id': email_id}, {'$set': {'status': 'sent'}})
 
-def schedule_followup_emails(lead_email, sender_email, sender_name, initial_time, base_payload, prompts_by_day, intervals=[0,3,8,17,24,30]):
+def schedule_followup_emails(lead_email: str, base_payload: dict, followup_days: list, user_email: str):
     """
     Schedule follow-up emails for a lead.
-    
-    Args:
-        lead_email (str): Email address of the lead
-        sender_email (str): Email address of the sender
-        sender_name (str): Name of the sender
-        initial_time (datetime): Time when the initial email was sent
-        base_payload (dict): Base email payload containing subject and body
-        prompts_by_day (dict): Dictionary mapping day numbers to their respective prompts
-        intervals (list): List of days to send follow-ups (default: [0,3,8,17,24,30])
-    
-    Returns:
-        list: List of scheduled email IDs
     """
-    from datetime import timedelta
-    import time
-    from scheduled_email_worker import send_email  # Import here to avoid circular dependency
-    
-    scheduled_ids = []
-    is_development = os.getenv('ENVIRONMENT', 'production').lower() == 'development'
-    
-    # Get the initial subject from base_payload
-    initial_subject = base_payload.get("subject", "")
-    
-    # Get lead details from the initial email
-    lead_details = {
-        "email": lead_email,
-        "name": base_payload.get("recipient", ""),
-    }
-    
-    # Get product details from the initial email
-    product_details = base_payload.get("product_details", "")
-    
-    for day in sorted(intervals):
-        # For 0th day, use the initial email
-        if day == 0:
-            email_data = {
-                "email": [lead_email],
-                "subject": initial_subject,
-                "body": base_payload.get("body", ""),
-                "sender_email": sender_email,
-                "sender_name": sender_name,
-                "scheduled_time": initial_time,
-                "status": 'pending',
-                "followup_day": 0,
-                "responded": False,
-                "prompt": prompts_by_day.get(day, ""),
-                "initial_email_time": initial_time,
-                "conversation_id": f"{sender_email}_{lead_email}_{initial_time.strftime('%Y%m%d%H%M%S')}"
-            }
-        else:
-            # For follow-ups, use the provided email content
-            # Calculate scheduled time
-            if is_development:
-                scheduled_time = initial_time + timedelta(minutes=2)
-            else:
-                scheduled_time = initial_time + timedelta(days=day)
-                scheduled_time = scheduled_time.replace(hour=9, minute=0, second=0, microsecond=0)
+    try:
+        # Get the lead's company name
+        lead = collection.find_one({"email": lead_email})
+        company_name = lead.get('company', 'your company') if lead else 'your company'
+        
+        # Get product name from the base payload
+        product_name = base_payload.get("product_name", "our product")
+        
+        # Create follow-up subject
+        followup_subject = f"Follow-up: {product_name} for {company_name}"
+        
+        # Schedule each follow-up email
+        for day in followup_days:
+            scheduled_time = datetime.now() + timedelta(days=day)
             
-            email_data = {
-                "email": [lead_email],
-                "subject": initial_subject,  # Always use the initial subject
-                "body": base_payload.get("body", ""),  # Use the provided body
-                "sender_email": sender_email,
-                "sender_name": sender_name,
+            # Create the email payload
+            email_payload = {
+                "email": base_payload["email"],
+                "subject": followup_subject if day > 0 else base_payload.get("subject", ""),
+                "body": base_payload["body"],
+                "sender_email": base_payload["sender_email"],
+                "sender_name": base_payload["sender_name"],
                 "scheduled_time": scheduled_time,
-                "status": 'pending',
                 "followup_day": 0 if is_development else day,
-                "responded": False,
-                "prompt": prompts_by_day.get(day, ""),
-                "initial_email_time": initial_time,
-                "conversation_id": f"{sender_email}_{lead_email}_{initial_time.strftime('%Y%m%d%H%M%S')}"
+                "status": "scheduled",
+                "lead_id": base_payload.get("lead_id", ""),
+                "lead_name": base_payload.get("lead_name", ""),
+                "user_email": user_email
             }
-        
-        scheduled_id = save_scheduled_email(email_data)
-        scheduled_ids.append(scheduled_id)
-        
-        # For 0th day, send the email immediately
-        if day == 0:
-            result = send_email(email_data)
-            if result:
-                mark_email_as_sent(scheduled_id)
-                print(f"Sent initial email to {lead_email}")
-    
-    return scheduled_ids
+            
+            # Insert into scheduled_emails collection
+            scheduled_emails_collection.insert_one(email_payload)
+            
+        return True
+    except Exception as e:
+        logging.error(f"Error scheduling follow-up emails: {e}")
+        return False
 
 def fetch_scheduled_emails(user_email):
     """

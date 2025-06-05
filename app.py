@@ -4,7 +4,7 @@ import json
 import logging
 import time
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
 # Third-party imports
@@ -29,12 +29,13 @@ from outlook_auth import (
 )
 from personalised_email import (
     product_database, generate_email_for_single_lead_with_custom_prompt,
-    get_product_details, FOLLOWUP_PROMPTS
+    get_product_details, FOLLOWUP_PROMPTS, subject_style, body_style
 )
 from mongodb_client import (
     save_enriched_data, save_generated_emails, collection,
     generated_emails_collection, lead_exists, delete_lead_by_id,
-    delete_email_by_id, get_signature, save_signature
+    delete_email_by_id, get_signature, save_signature,
+    scheduled_emails_collection
 )
 from outlook_sender import prepare_outlook_email_payloads, OutlookSender
 from people_search import get_people_search_results
@@ -328,7 +329,7 @@ def prepare_email_payloads(generated_emails, enriched_data):
                         if signature:
                             body = email.get('body', '')
                             if body.strip().endswith("Best Regards,"):
-                                body = body.rstrip() + f"\n\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
+                                body = body.rstrip() + f"\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
                                 email['body'] = body
                         # Add the properly formatted closing
                         # body = f"{body}\n\nBest Regards,\n{sender_name}"
@@ -608,9 +609,53 @@ def main():
                         help="Enter locations separated by commas"
                     )
                 with st.expander("Industry"):
-                    industries_input = st.text_input(
-                        "Industries (comma-separated)",
-                        help="Enter industries separated by commas"
+                    industries = [
+                        "Accounting", "Agriculture", "Airlines/Aviation", "Alternative Dispute Resolution",
+                        "Alternative Medicine", "Animation", "Apparel & Fashion", "Architecture & Planning",
+                        "Arts & Crafts", "Automotive", "Aviation & Aerospace", "Banking", "Biotechnology",
+                        "Broadcast Media", "Building Materials", "Business Supplies & Equipment", "Capital Markets",
+                        "Chemicals", "Civic & Social Organization", "Civil Engineering", "Commercial Real Estate",
+                        "Computer & Network Security", "Computer Games", "Computer Hardware", "Computer Networking",
+                        "Computer Software", "Construction", "Consumer Electronics", "Consumer Goods",
+                        "Consumer Services", "Cosmetics", "Dairy", "Defense & Space", "Design", "E-Learning",
+                        "Education Management", "Electrical/Electronic Manufacturing", "Entertainment",
+                        "Environmental Services", "Events Services", "Executive Office", "Facilities Services",
+                        "Farming", "Financial Services", "Fine Art", "Fishery", "Food & Beverages",
+                        "Food Production", "Fund-Raising", "Furniture", "Gambling & Casinos",
+                        "Glass, Ceramics & Concrete", "Government Administration", "Government Relations",
+                        "Graphic Design", "Health, Wellness & Fitness", "Higher Education",
+                        "Hospital & Health Care", "Hospitality", "Human Resources", "Import & Export",
+                        "Individual & Family Services", "Industrial Automation", "Information Services",
+                        "Information Technology & Services", "Insurance", "International Affairs",
+                        "International Trade & Development", "Internet", "Investment Banking",
+                        "Investment Management", "Judiciary", "Law Enforcement", "Law Practice",
+                        "Legal Services", "Legislative Office", "Leisure, Travel & Tourism", "Libraries",
+                        "Logistics & Supply Chain", "Luxury Goods & Jewelry", "Machinery",
+                        "Management Consulting", "Maritime", "Market Research", "Marketing & Advertising",
+                        "Mechanical or Industrial Engineering", "Media Production", "Medical Devices",
+                        "Medical Practice", "Mental Health Care", "Military", "Mining & Metals",
+                        "Motion Pictures & Film", "Museums & Institutions", "Music", "Nanotechnology",
+                        "Newspapers", "Nonprofit Organization Management", "Oil & Energy", "Online Media",
+                        "Outsourcing/Offshoring", "Package/Freight Delivery", "Packaging & Containers",
+                        "Paper & Forest Products", "Performing Arts", "Pharmaceuticals", "Philanthropy",
+                        "Photography", "Plastics", "Political Organization", "Primary/Secondary Education",
+                        "Printing", "Professional Training & Coaching", "Program Development",
+                        "Public Policy", "Public Relations & Communications", "Public Safety",
+                        "Publishing", "Railroad Manufacture", "Ranching", "Real Estate",
+                        "Recreational Facilities & Services", "Religious Institutions",
+                        "Renewables & Environment", "Research", "Restaurants", "Retail",
+                        "Security & Investigations", "Semiconductors", "Shipbuilding",
+                        "Sporting Goods", "Sports", "Staffing & Recruiting", "Supermarkets",
+                        "Telecommunications", "Textiles", "Think Tanks", "Tobacco",
+                        "Translation & Localization", "Transportation/Trucking/Railroad",
+                        "Utilities", "Venture Capital & Private Equity", "Veterinary",
+                        "Warehousing", "Wholesale", "Wine & Spirits", "Wireless",
+                        "Writing & Editing"
+                    ]
+                    selected_industries = st.multiselect(
+                        "Select Industries",
+                        options=industries,
+                        help="Select one or more industries to filter by"
                     )
                 results_count = st.number_input(
                     "Results (number of people to fetch)",
@@ -630,7 +675,7 @@ def main():
             if submitted:
                 titles = [title.strip() for title in titles_input.split(",")]
                 locations = [location.strip() for location in locations_input.split(",")]
-                industries = [industry.strip() for industry in industries_input.split(",")]
+                industries = selected_industries  # Use the selected industries from dropdown
                 with st.spinner("Searching..."):
                     results = get_people_search_results(
                         person_titles=titles,
@@ -938,13 +983,22 @@ def main():
                     all_generated_emails = []
                     for lead in all_leads:
                         lead_emails = []
+                        # Get recipient details from lead data
+                        recipient_name = lead.get('name', 'No recipient')
+                        recipient_email = lead.get('email', 'No email provided')
+                        
                         for day in sorted(intervals):
                             prompt = FOLLOWUP_PROMPTS[day]
                             email = generate_email_for_single_lead_with_custom_prompt(
                                 lead_details=lead,
                                 product_details=product_details,
-                                day=day,
-                                product_name=product
+                                prompt=prompt,
+                                subject_style=subject_style,
+                                body_style=body_style,
+                                recipient_name=recipient_name,
+                                recipient_email=recipient_email,
+                                product_name=product,
+                                followup_day=day
                             )
                             
                             # Add signature if it exists
@@ -1109,15 +1163,17 @@ def main():
                                             if body.strip().endswith("Best Regards,"):
                                                 body = body.rstrip() + f"\n\n{signature['name']}\n{signature['company']}\n{signature['linkedin_url']}\n"
                                                 email['body'] = body
-                                        # Add the properly formatted closing
-                                        #body = f"{body}\n\nBest Regards,\n{sender_name}"
                                     
                                     # Create payload
                                     payload = {
                                         "email": [recipient_email],
                                         "subject": subject,
                                         "body": body,
-                                        "interval_day": interval_day
+                                        "interval_day": interval_day,
+                                        "sender_email": sender_email,
+                                        "sender_name": sender_name,
+                                        "lead_id": lead_id,
+                                        "lead_name": lead_block.get("lead_name", "")
                                     }
                                     
                                     # Separate immediate and follow-up emails
@@ -1149,8 +1205,6 @@ def main():
                                 result = sender.send_email_batch([payload])
                                 if result:
                                     successful += 1
-                                else:
-                                    failed += 1
                             except Exception as e:
                                 print(f"[DEBUG] Error sending immediate email: {str(e)}")
                                 failed += 1
@@ -1161,10 +1215,14 @@ def main():
                     else:
                         st.info("No immediate emails to send")
                     
-                    # Schedule follow-up emails
+                    # Save follow-up emails to MongoDB for scheduling
                     if followup_payloads:
-                        print(f"[DEBUG] Scheduling {len(followup_payloads)} follow-up emails")
-                        from mongodb_client import schedule_followup_emails
+                        print(f"[DEBUG] Saving {len(followup_payloads)} follow-up emails for scheduling")
+                        from mongodb_client import scheduled_emails_collection
+                        
+                        # Check if we're in development mode
+                        import os  # Ensure os is imported in this scope
+                        is_development = os.getenv('ENVIRONMENT', 'production').lower() == 'development'
                         
                         # Group follow-ups by lead
                         followups_by_lead = {}
@@ -1174,38 +1232,50 @@ def main():
                                 followups_by_lead[lead_email] = []
                             followups_by_lead[lead_email].append(payload)
                         
-                        # Schedule follow-ups for each lead
+                        # Save follow-ups for each lead
                         for lead_email, lead_payloads in followups_by_lead.items():
-                            # Create base payload
-                            base_payload = {
-                                "subject": lead_payloads[0]["subject"],
-                                "body": lead_payloads[0]["body"],
-                                "recipient": lead_payloads[0].get("recipient", ""),
-                                "product_details": lead_payloads[0].get("product_details", "")
-                            }
-                            
-                            # Get intervals for this lead
-                            intervals = [p["interval_day"] for p in lead_payloads]
-                            
-                            # Schedule the follow-ups
-                            scheduled_ids = schedule_followup_emails(
-                                lead_email=lead_email,
-                                sender_email=sender_email,
-                                sender_name=sender_name,
-                                initial_time=current_time,
-                                base_payload=base_payload,
-                                prompts_by_day={day: FOLLOWUP_PROMPTS[day] for day in intervals},
-                                intervals=intervals
-                            )
-                            
-                            if scheduled_ids:
-                                successful += 1
-                            else:
+                            try:
+                                # Calculate scheduled time for each follow-up
+                                for payload in lead_payloads:
+                                    interval_day = payload['interval_day']
+                                    if is_development:
+                                        # In development, schedule for 2 minutes after current time
+                                        scheduled_time = current_time + timedelta(minutes=2)
+                                    else:
+                                        # In production, schedule for 9 AM on the specified day
+                                        scheduled_time = current_time + timedelta(days=interval_day)
+                                        scheduled_time = scheduled_time.replace(hour=9, minute=0, second=0, microsecond=0)
+                                    
+                                    # Create scheduled email document
+                                    scheduled_email = {
+                                        "email": payload['email'],
+                                        "subject": payload['subject'],
+                                        "body": payload['body'],
+                                        "sender_email": payload['sender_email'],
+                                        "sender_name": payload['sender_name'],
+                                        "scheduled_time": scheduled_time,
+                                        "status": "pending",
+                                        "followup_day": 0 if is_development else interval_day,
+                                        "responded": False,
+                                        "conversation_id": f"{payload['sender_email']}_{lead_email}_{current_time.strftime('%Y%m%d%H%M%S')}",
+                                        "lead_id": payload['lead_id'],
+                                        "lead_name": payload['lead_name']
+                                    }
+                                    
+                                    # Save to MongoDB
+                                    result = scheduled_emails_collection.insert_one(scheduled_email)
+                                    if result.inserted_id:
+                                        successful += 1
+                                    else:
+                                        failed += 1
+                                        
+                            except Exception as e:
+                                print(f"[DEBUG] Error saving follow-up for {lead_email}: {str(e)}")
                                 failed += 1
                         
-                        st.success(f"Successfully scheduled {successful} follow-up email sequences")
+                        st.success(f"Successfully scheduled {successful} follow-up emails")
                         if failed > 0:
-                            st.warning(f"Failed to schedule {failed} follow-up email sequences")
+                            st.warning(f"Failed to schedule {failed} follow-up emails")
                     else:
                         st.info("No follow-up emails to schedule")
 

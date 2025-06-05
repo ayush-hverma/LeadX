@@ -1,118 +1,99 @@
 import time
-from datetime import datetime, time as dt_time
-from email_sender import EmailSender
-from outlook_sender import OutlookSender
+import logging
+from datetime import datetime
 from mongodb_client import get_due_scheduled_emails, mark_email_as_sent, check_and_update_email_responses, scheduled_emails_collection
 import os
 
-def is_time_to_send(current_time):
-    """Check if it's 9 AM to send scheduled emails."""
-    return current_time.hour == 9 and current_time.minute == 0
+def is_time_to_send(scheduled_time):
+    """Check if it's time to send the scheduled email."""
+    # Check if we're in development mode
+    is_development = os.getenv('ENVIRONMENT', 'production').lower() == 'development'
+    current_time = datetime.now()
+    
+    if is_development:
+        # In development, check if 2 minutes have passed since the scheduled time
+        time_diff = current_time - scheduled_time
+        return time_diff.total_seconds() >= 120  # 120 seconds = 2 minutes
+    else:
+        # In production, check if it's 9 AM on the scheduled day
+        return (current_time.hour == 9 and 
+                # current_time.minute < 2 and  # Give a 2-minute window
+                current_time.date() == scheduled_time.date())
 
 def send_email(email_data):
-    """Send a single email using the appropriate sender."""
+    """Send a single email using the appropriate sender"""
     try:
-        # Choose sender based on email['sender_email']
-        if 'outlook.com' in email_data['sender_email'] or 'microsoft' in email_data['sender_email'] or 'panscience' in email_data['sender_email']:
+        # Determine which sender to use based on the email address
+        if '@panscience' in email_data['sender_email'].lower() or '@outlook.com' in email_data['sender_email'].lower():
+            from outlook_sender import OutlookSender
             sender = OutlookSender()
         else:
+            from email_sender import EmailSender
             sender = EmailSender()
-            
-        payload = {
-            "email": email_data["email"],
-            "subject": email_data["subject"],
-            "body": email_data["body"],
-            "sender_email": email_data["sender_email"],
-            "sender_name": email_data["sender_name"]
-        }
         
         # Send the email
-        if isinstance(sender, OutlookSender):
-            result = sender.send_email_batch([payload])
-        else:
-            import asyncio
-            result = asyncio.run(sender.send_emails([payload]))
-            
+        result = sender.send_email_batch([{
+            'email': email_data['email'][0],
+            'subject': email_data['subject'],
+            'body': email_data['body'],
+            'sender_email': email_data['sender_email'],
+            'sender_name': email_data['sender_name']
+        }])
+        
         return result
     except Exception as e:
-        print(f"Failed to send email: {e}")
-        return None
+        logging.error(f"Error sending email: {e}")
+        return False
 
 def run_worker():
-    """
-    Worker that runs periodically to send scheduled emails.
-    - Sends initial emails immediately
-    - In development: Sends follow-ups after 2 minutes
-    - In production: Sends follow-ups at 9 AM
-    - Checks for replies before sending any follow-up
-    """
+    """Run the worker to process scheduled emails."""
     while True:
-        now = datetime.now()
-        is_development = os.getenv('ENVIRONMENT', 'production').lower() == 'development'
-        
-        # Get all pending emails
-        due_emails = get_due_scheduled_emails(now)
-        
-        if due_emails:
-            print(f"Found {len(due_emails)} scheduled emails to process...")
+        try:
+            # Get all pending scheduled emails
+            scheduled_emails = scheduled_emails_collection.find({
+                "status": "pending"
+            })
             
             # Group emails by conversation
-            conversation_emails = {}
-            for email in due_emails:
+            emails_by_conversation = {}
+            for email in scheduled_emails:
                 conv_id = email.get('conversation_id')
-                if conv_id not in conversation_emails:
-                    conversation_emails[conv_id] = []
-                conversation_emails[conv_id].append(email)
+                if conv_id not in emails_by_conversation:
+                    emails_by_conversation[conv_id] = []
+                emails_by_conversation[conv_id].append(email)
             
             # Process each conversation
-            for conv_id, emails in conversation_emails.items():
-                # Sort emails by followup_day
-                emails.sort(key=lambda x: x['followup_day'])
-                
-                # Check if any email in this conversation has been responded to
+            for conv_id, emails in emails_by_conversation.items():
+                # Check if any email in the conversation has been responded to
                 has_response = any(email.get('responded', False) for email in emails)
                 
-                if has_response:
-                    # Mark all pending follow-ups as cancelled
+                if not has_response:
+                    # Process each email in the conversation
                     for email in emails:
-                        if email['status'] == 'pending':
-                            scheduled_emails_collection.update_one(
-                                {'_id': email['_id']},
-                                {'$set': {'status': 'cancelled', 'responded': True}}
-                            )
-                    continue
-                
-                # Process each email in the conversation
-                for email in emails:
-                    # Skip if already sent or cancelled
-                    if email['status'] in ['sent', 'cancelled']:
-                        continue
-                    
-                    # For initial email (day 0), send immediately
-                    if email['followup_day'] == 0:
-                        result = send_email(email)
-                        if result:
-                            mark_email_as_sent(email['_id'])
-                            print(f"Sent initial email to {email['email']}")
-                    
-                    # For follow-ups
-                    else:
-                        # In development, send after 2 minutes
-                        # In production, only send at 9 AM
-                        if is_development or is_time_to_send(now):
-                            # Check for replies before sending
-                            check_and_update_email_responses(email['sender_email'])
-                    
-                            # Recheck if the email should still be sent
-                            updated_email = scheduled_emails_collection.find_one({'_id': email['_id']})
-                            if updated_email and updated_email['status'] == 'pending' and not updated_email.get('responded', False):
-                                result = send_email(email)
-                                if result:
-                                    mark_email_as_sent(email['_id'])
-                                    print(f"Sent follow-up email to {email['email']}")
-        
-        # Sleep for 1 minute before next check
-        time.sleep(120)
+                        if is_time_to_send(email['scheduled_time']):
+                            try:
+                                # Send the email
+                                send_email(email)
+                                
+                                # Update status
+                                scheduled_emails_collection.update_one(
+                                    {"_id": email["_id"]},
+                                    {"$set": {"status": "sent"}}
+                                )
+                            except Exception as e:
+                                logging.error(f"Error sending scheduled email: {str(e)}")
+                                # Update status to failed
+                                scheduled_emails_collection.update_one(
+                                    {"_id": email["_id"]},
+                                    {"$set": {"status": "failed", "error": str(e)}}
+                                )
+            
+            # Sleep for 1 minute before next check
+            time.sleep(60)
+            
+        except Exception as e:
+            logging.error(f"Error in worker loop: {str(e)}")
+            time.sleep(60)  # Sleep for 1 minute before retrying
 
 if __name__ == "__main__":
     run_worker()
