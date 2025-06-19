@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta
 
 # Try to get MongoDB URI from Streamlit secrets, fallback to environment variable
-MONGODB_URI = ""
+MONGODB_URI = "mongodb+srv://ayu5hhverma03:ayush2503@leadx.mnrxujx.mongodb.net/?retryWrites=true&w=majority&appName=LeadX"
 if not MONGODB_URI:
     raise ValueError("MongoDB URI not found in Streamlit secrets or environment variables.")
 
