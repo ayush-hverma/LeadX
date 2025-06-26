@@ -1,4 +1,4 @@
-# LeadxV2 - Apollo.io People Pipeline
+# LeadxV2 
 
 A Streamlit application for automating lead generation, enrichment, and email outreach using Apollo.io API.
 
